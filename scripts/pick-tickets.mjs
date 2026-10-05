@@ -105,7 +105,7 @@ export async function pickTickets({ includeTested = false } = {}) {
   const state = readState();
   const jql = pickupJql();
   const bugJql = bugRetestJql(state);
-  const client = await connectJira({ quietAuth: true });
+  const client = await connectJira({ quietAuth: true, connectTimeoutMs: Number(env('JIRA_CONNECT_TIMEOUT_SEC', '90')) * 1000 });
   try {
     const first = await collect(client, site, status, jql, 'test', state, includeTested);
     const retest = bugJql ? await collect(client, site, status, bugJql, 'retest', state, includeTested) : { found: 0, tickets: [] };

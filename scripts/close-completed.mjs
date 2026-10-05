@@ -59,7 +59,7 @@ export async function closeCompleted({ keys, dryRun = false, log = console.log }
   const state = readState();
   const parents = (keys?.length ? keys : Object.keys(state)).filter((k) => state[k] && state[k].mode !== 'retest' && !state[k].closedAt);
   if (!parents.length) return [];
-  const client = await connectJira({ quietAuth: true });
+  const client = await connectJira({ quietAuth: true, connectTimeoutMs: Number(env('JIRA_CONNECT_TIMEOUT_SEC', '90')) * 1000 });
   const decisions = [];
   try {
     for (const key of parents) {
