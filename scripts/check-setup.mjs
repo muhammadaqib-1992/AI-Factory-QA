@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchBrowser } from '../lib/browser.mjs';
 import { REPO_ROOT, loadEnv } from '../lib/env.mjs';
 
 const ci = process.argv.includes('--ci');
@@ -25,7 +25,7 @@ parseInt(process.versions.node, 10) >= 20 ? ok(`Node ${process.version}`) : bad(
 if (process.platform === 'linux' && process.getuid?.() === 0) warn('running as root — Chromium needs a normal user (or --no-sandbox)');
 existsSync(join(REPO_ROOT, 'node_modules', '@playwright', 'mcp')) ? ok('node_modules installed') : bad('run npm ci');
 try {
-  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  const browser = await launchBrowser();
   await browser.close();
   ok('Chromium starts headless');
 } catch (e) {

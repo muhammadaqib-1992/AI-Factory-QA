@@ -7,7 +7,7 @@
 // Exit 0 = logged in, 1 = not logged in (run: node scripts/netsuite-login.mjs).
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchBrowser } from '../lib/browser.mjs';
 import { REPO_ROOT, netsuiteAppUrl } from '../lib/env.mjs';
 
 const STATE = join(REPO_ROOT, '.auth', 'netsuite-state.json');
@@ -17,7 +17,7 @@ if (!existsSync(STATE)) {
 }
 
 const app = netsuiteAppUrl();
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchBrowser();
 try {
   const context = await browser.newContext({ storageState: STATE, viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();

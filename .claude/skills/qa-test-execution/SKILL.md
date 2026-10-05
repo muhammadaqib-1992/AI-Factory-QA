@@ -1,75 +1,104 @@
 ---
 name: qa-test-execution
-description: "Executes QA test cases end-to-end against the running application. Sources the test case (pasted in chat, from qa-test-writing, or a tracker ticket), drives the browser via the browser-automation MCP, cross-checks backend data via the data MCP when a step requires it, and produces a pass/fail execution report, saved date-stamped to reports/ (failure evidence to bug-evidence/). Use whenever the user says 'execute TC_', 'run this test case', 'test this on staging', 'go through <ticket id>', 'verify this works', or asks for validation of application behaviour against a written test case. Do NOT use for ad-hoc browsing with no defined test case, for writing new test cases (qa-test-writing), or for role/permission coverage (qa-permission-testing). Never files a defect automatically — on a failure it offers to hand off to qa-bug-reporting and waits for explicit confirmation."
+description: "Executes test cases/scripts end-to-end in NetSuite, headless, without stopping to ask. Use IMMEDIATELY whenever the user says 'execute these scripts', 'execute the scripts', 'execute', 'run these test cases', 'run the scripts', 'execute TC_…', 'execute <file>.md', 'execute <JIRA-KEY>', 'test this ticket', 'run it on NetSuite' or 'verify this works'. Sources the cases from test-cases/*.md, from chat, or from a Jira ticket; checks the saved NetSuite session; drives the Playwright MCP headless (or a Playwright script on the saved session when the MCP cannot start); screenshots every step; verifies record state; writes results.json and builds the PDF report in reports/. Do NOT use for writing new cases (qa-test-writing) or filing a defect on its own (qa-bug-reporting)."
 ---
 
 # QA Test Execution
 
-Runs a test case the way a QA engineer would: confirm what "pass" means, drive the real application, verify against the system of record, and report actual versus expected. This skill executes and reports — it does not file defects.
+"Execute these scripts" means: run every case end to end, now, and come back with results,
+screenshots and a PDF. Don't ask for confirmation between cases or steps — the user already
+asked. Stop only for something the user must do (an expired login, a missing value).
 
-**Only load `references/report-format.md` when you are about to write the report.**
+**Load `references/netsuite-ui.md` before driving a NetSuite form** — it holds the field
+locators and quirks already learned. **Load `references/results-format.md` before writing
+results.json.**
 
 ## Ground rules
 
-1. **Never store or write down credentials** — not in this file, not in scripts, not in the report, not in chat beyond the turn the user gives them. Read them from `.claude/qa-test-env.md`; if a value is a `<PLACEHOLDER>`, ask for that run only.
-2. **The UI is not the source of truth.** Most test cases compare what the application *shows* against what the backend actually *holds*. Check both. "It looked right" is not a pass for a data-accuracy case.
-3. **Never auto-file a defect.** A failure gets reported clearly, with an offer to hand off to `qa-bug-reporting`. Filing happens only if the user says so after reading the report.
-4. **Confirm your tooling is live before starting.** If the browser MCP isn't reachable, stop and say so rather than failing silently halfway through a run.
-5. **Report what happened, not what should have happened.** If you skipped a step, say so. If you substituted test data, say so. A report that hides its own gaps is worse than no report, because someone will act on it.
+1. **Never type a password.** The browser runs on the saved session in
+   `.auth/netsuite-state.json`. If it has expired, tell the user to run
+   `node scripts/netsuite-login.mjs` (it signs in headless from `.env`, 2FA included) and stop.
+2. **Record state is the truth.** A "Transaction successfully Saved" banner is not a pass on its
+   own: open the saved record and check the fields the case asserts.
+3. **Evidence for every step.** One screenshot per step into the run's `screenshots/` folder,
+   numbered in order. Failures always get one.
+4. **Report what happened.** Skipped, blocked or substituted data is written down, not hidden.
+5. **Record every record you create** (type, internal id, link) — the next run and the report
+   need it.
 
-## Step 1 — Establish the test case
+## Step 1 — Find the cases
 
-Source it from chat, from `qa-test-writing`, or from a tracker ticket. Normalise into: id, pre-condition, numbered steps, expected result per step.
+- A file named or implied (`execute these scripts` right after cases were written or opened) →
+  that `test-cases/*.md` file. If several match and context doesn't say which, run the newest.
+- Cases pasted in chat → write them to `test-cases/YYYY-MM-DD_<ID>_<slug>.md` first (format:
+  `.claude/skills/qa-test-writing/references/test-case-format.md`), then run that file.
+- A Jira key → read the ticket through the Jira MCP; if no case file exists for it yet, write the
+  cases with `qa-test-writing` first, then run them.
 
-If the expected result is vague ("works correctly"), resolve that **before** running anything — an unfalsifiable case wastes the whole run.
+Run id = `YYYY-MM-DD_<ID>` (ticket key, or the case-file short code). Everything for the run goes
+in `reports/<run id>/`.
 
-## Step 2 — Satisfy the pre-condition
+## Step 2 — Preflight (fast, every time)
 
-Before touching the browser, verify the pre-condition is actually true. If it references backend state (a record's status, a quantity, a configuration toggle, a role assignment), check it via the data MCP rather than assuming.
-
-If the state is wrong, **ask before changing it.** Setting up test data by mutating records is a legitimate step, but silently altering the system of record invalidates whatever else is running against it.
-
-## Step 3 — Log in as the right role
-
-Confirm which environment and which role the case requires, then authenticate. Capture the landed state before proceeding — it is the first piece of evidence, and it catches "the run was against the wrong environment" before you waste twenty steps.
-
-## Step 4 — Execute
-
-One step at a time:
-
-- Perform the action.
-- Capture the actual result — screenshot or page state.
-- Where the expected result is a backend comparison, pull the backend value and **state both numbers explicitly** in the report. "Matched" is a conclusion; "UI 55, backend 55" is evidence.
-- Compare against expected immediately, not in a batch at the end.
-- If a step blocks progress, mark it and everything downstream **Blocked**, capture evidence, and stop.
-
-## Step 5 — Handle a failure
-
-A failure on one step doesn't automatically end the run: if later steps are independent, continue and report both. If they depend on the failed step, stop and mark the rest Blocked.
-
-Capture evidence at the moment of failure — screenshot, console error, exact field values. Reconstructing it afterwards is unreliable and the detail that mattered is usually gone.
-
-Save it straight into a draft evidence folder, so it's ready if a defect is raised:
-
-```
-bug-evidence/DRAFT_YYYY-MM-DD_<TC-id>/
-├── 01_<what-it-shows>.png
-├── console.txt        # console errors, if any
-└── backend.txt        # the backend values you compared against
+```bash
+node scripts/check-netsuite-session.mjs
 ```
 
-With the browser MCP, pass that path as the screenshot filename rather than saving elsewhere and moving it. Follow `bug-evidence/README.md` — above all, no credentials, no session-token URLs, no HAR files. Passed steps need no image files; the report's Actual column is enough.
+- `Logged in …` → continue.
+- `NOT logged in` → stop and ask the user to run `node scripts/netsuite-login.mjs`; resume when
+  they say done.
 
-## Step 6 — Report and hand off
+## Step 3 — Pick the driver
 
-Write the report per `references/report-format.md`, post it in chat, and save it to:
+1. **Playwright MCP** (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`,
+   `browser_select_option`, `browser_take_screenshot`, …). It starts headless on the saved
+   session. Try one `browser_navigate` to the NetSuite home page.
+2. If that call errors (e.g. `spawn UNKNOWN` — the MCP was started before its browser setting
+   changed), use the **script driver**: write `state/run-<run id>.mjs` with Playwright, launching
+   through `lib/browser.mjs` (`launchBrowser()`) with
+   `storageState: '.auth/netsuite-state.json'`, and run it with `node`. Same steps, same
+   screenshots. Say in the report which driver ran, and tell the user `/mcp` → playwright →
+   Reconnect restores the MCP.
 
+## Step 4 — Execute each case
+
+For each case, in order:
+
+1. Note the start time. Establish the pre-condition (find test data in the UI or via the NetSuite
+   MCP if it is signed in).
+2. Do each step. After each: screenshot →
+   `reports/<run id>/screenshots/<TC id>_<NN>_<what-it-shows>.png`
+   (MCP: `browser_take_screenshot` with that `filename`; script: `page.screenshot`).
+3. Compare with the expected result straight away. Write the actual result with values
+   ("Order #2445 saved, status Pending Fulfillment, total 1,280.00"), not verdicts.
+4. Accept NetSuite `confirm()` dialogs that the step itself triggers; capture any alert text —
+   an unexpected alert is a finding.
+5. Status per case: **Passed** (verified), **Failed** (contradicts expected), **Blocked** (could
+   not run — say why), **Not Run**. A failed step blocks later steps that depend on it; continue
+   with the independent ones.
+6. Created records: capture internal id (`id=` in the URL) and number, link
+   `…/app/accounting/transactions/transaction.nl?id=<id>`.
+
+## Step 5 — Results and PDF
+
+Write `reports/<run id>/results.json` (format in `references/results-format.md`, with
+`"complete": true` only when every case has a final status), then:
+
+```bash
+node scripts/build-report.mjs reports/<run id>
 ```
-reports/YYYY-MM-DD_<TC-id>_<env>.md
-```
 
-using the date of the run — e.g. `reports/2026-09-12_TC_PDP_002_sandbox.md`. One file per test case per run: a re-run gets a new dated file, never an overwrite, because a history of fails-then-passes is itself evidence. Reference any failure evidence by its `bug-evidence/` path in the Evidence section, and say where the report was saved.
+That writes `reports/<run id>/report.pdf` with the summary, every case, Jira links, and the
+failure screenshots.
 
-Saving to `reports/` is part of the run. Posting the report anywhere else — the tracker, a shared sheet — still needs the user's go-ahead.
+## Step 6 — Failures → bugs
 
-If the result is **Failed**, mention that you can draft a defect via `qa-bug-reporting` — then wait. Never chain straight into filing.
+If any case **Failed** and the cases came from a Jira ticket, hand each failure to
+`qa-bug-reporting` (it files under the parent ticket per its settings), then add the bug keys to
+results.json and rebuild the PDF. Without a ticket, list the failures and offer to file them.
+
+## Step 7 — Tell the user
+
+Reply with: a table (case → status → actual, with created record links), the PDF path, the
+screenshots folder, any bugs filed with links, and anything that blocked or needs their action.
+Send the PDF with SendUserFile when that tool is available.

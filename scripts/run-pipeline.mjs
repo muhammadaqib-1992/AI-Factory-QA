@@ -1,0 +1,211 @@
+#!/usr/bin/env node
+// The unattended QA pipeline. Run it on a schedule (cron / Task Scheduler) — nobody has to say
+// anything:
+//
+//   1. picks the Jira tickets that are Ready for QA, assigned to the QA user and labelled
+//      (scripts/pick-tickets.mjs), skipping QA cycles already tested
+//   2. makes sure the NetSuite session is valid (refreshes the headless login from .env if not)
+//   3. gives each ticket the next execution number (EXEC-0001, EXEC-0002, …)
+//   4. runs Claude headless with the qa-jira-pipeline skill: ticket → test cases → execution →
+//      bugs → results.json
+//   5. builds reports/<EXEC>_<KEY>/report.pdf and records the tested cycle
+//
+//   node scripts/run-pipeline.mjs                 normal run
+//   node scripts/run-pipeline.mjs --ticket NU-1   run one ticket now, whatever its status
+//   node scripts/run-pipeline.mjs --dry-run       show what would run, run nothing
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { join } from 'node:path';
+import { REPO_ROOT, env, loadEnv } from '../lib/env.mjs';
+import { JIRA_SITE } from '../lib/jira-mcp-client.mjs';
+import { buildPdf } from './build-report.mjs';
+import { STATE_FILE, pickTickets, readState } from './pick-tickets.mjs';
+
+loadEnv(); // children (Claude, the MCP servers it starts) inherit .env through process.env
+
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const onlyTicket = args.includes('--ticket') ? args[args.indexOf('--ticket') + 1] : null;
+const STATE_DIR = join(REPO_ROOT, 'state');
+const LOCK = join(STATE_DIR, 'pipeline.lock');
+const COUNTER = join(STATE_DIR, 'execution-counter.json');
+const LOGS = join(REPO_ROOT, 'logs');
+const log = (m) => console.log(`[${new Date().toISOString().slice(0, 19).replace('T', ' ')}] ${m}`);
+
+const ALLOWED_TOOLS = [
+  'mcp__playwright',
+  'mcp__netsuite',
+  'mcp__jira__getJiraIssue',
+  'mcp__jira__searchJiraIssuesUsingJql',
+  'mcp__jira__getJiraProjectIssueTypesMetadata',
+  'mcp__jira__getJiraIssueTypeMetaWithFields',
+  'mcp__jira__createJiraIssue',
+  'mcp__jira__addCommentToJiraIssue',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'Skill',
+  'Bash(node:*)',
+];
+
+function takeLock() {
+  mkdirSync(STATE_DIR, { recursive: true });
+  if (existsSync(LOCK)) {
+    const ageMin = (Date.now() - statSync(LOCK).mtimeMs) / 60000;
+    if (ageMin < Number(env('QA_LOCK_STALE_MIN', '240'))) {
+      log(`Another pipeline run holds ${LOCK} (${Math.round(ageMin)} min old) — exiting.`);
+      process.exit(0);
+    }
+    log('Removing a stale lock.');
+    rmSync(LOCK, { force: true });
+  }
+  const fd = openSync(LOCK, 'wx');
+  writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+  closeSync(fd);
+  const release = () => rmSync(LOCK, { force: true });
+  process.on('exit', release);
+  process.on('SIGINT', () => process.exit(130));
+  process.on('SIGTERM', () => process.exit(143));
+}
+
+function nextExecutionId() {
+  let last = 0;
+  try {
+    last = JSON.parse(readFileSync(COUNTER, 'utf8')).last || 0;
+  } catch {}
+  const next = last + 1;
+  writeFileSync(COUNTER, JSON.stringify({ last: next, updatedAt: new Date().toISOString() }, null, 2));
+  return `EXEC-${String(next).padStart(4, '0')}`;
+}
+
+function runNode(script, label) {
+  const r = spawnSync(process.execPath, [join(REPO_ROOT, 'scripts', script)], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 300000 });
+  const out = `${r.stdout || ''}${r.stderr || ''}`.trim();
+  log(`${label}: ${out.split('\n').filter(Boolean).slice(-1)[0] || `exit ${r.status}`}`);
+  return r.status === 0;
+}
+
+function ensureNetSuiteSession() {
+  if (runNode('check-netsuite-session.mjs', 'NetSuite session')) return true;
+  log('Refreshing the NetSuite login from .env…');
+  return runNode('netsuite-login.mjs', 'NetSuite login') && runNode('check-netsuite-session.mjs', 'NetSuite session');
+}
+
+function runClaude(ticket, execId, logFile) {
+  const claude = env('CLAUDE_BIN', 'claude');
+  const timeoutMin = Number(env('QA_TICKET_TIMEOUT_MIN', '45'));
+  const prompt = `/qa-jira-pipeline ${ticket.key} ${execId}`;
+  const cliArgs = ['-p', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', ALLOWED_TOOLS.join(','), '--output-format', 'text'];
+  if (env('CLAUDE_MODEL', '')) cliArgs.push('--model', env('CLAUDE_MODEL'));
+  log(`${execId} ${ticket.key}: running Claude (timeout ${timeoutMin} min) → ${logFile.replace(REPO_ROOT, '.')}`);
+  const r = spawnSync(claude, cliArgs, {
+    cwd: REPO_ROOT,
+    env: process.env,
+    encoding: 'utf8',
+    timeout: timeoutMin * 60000,
+    maxBuffer: 64 * 1024 * 1024,
+    shell: process.platform === 'win32', // resolves claude.cmd on Windows
+  });
+  writeFileSync(logFile, `$ ${claude} -p "${prompt}"\n\n${r.stdout || ''}\n${r.stderr || ''}\n${r.error ? `ERROR: ${r.error.message}\n` : ''}exit: ${r.status}\n`);
+  if (r.error?.code === 'ENOENT') throw new Error(`"${claude}" not found — install Claude Code: npm install -g @anthropic-ai/claude-code`);
+  return r.status === 0;
+}
+
+function ensureResults(dir, ticket, execId, reason) {
+  const file = join(dir, 'results.json');
+  if (existsSync(file)) {
+    const r = JSON.parse(readFileSync(file, 'utf8'));
+    if (!r.executionId) {
+      r.executionId = execId;
+      writeFileSync(file, JSON.stringify(r, null, 2));
+    }
+    return r;
+  }
+  const r = {
+    executionId: execId,
+    complete: false,
+    ticket: { key: ticket.key, summary: ticket.summary, type: ticket.type, priority: ticket.priority, url: ticket.url, statusEnteredAt: ticket.cycle },
+    environment: { name: env('NETSUITE_ACCOUNT_ID', ''), url: '' },
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    testCasesFile: `test-cases/${execId}_${ticket.key}.md`,
+    summary: 'The run ended before results were written.',
+    testCases: [],
+    bugs: [],
+    notes: [reason],
+  };
+  writeFileSync(file, JSON.stringify(r, null, 2));
+  return r;
+}
+
+async function main() {
+  if (!dryRun) takeLock();
+  let tickets;
+  if (onlyTicket) {
+    const site = JIRA_SITE();
+    tickets = [{ key: onlyTicket, url: `https://${site}/browse/${onlyTicket}`, cycle: `manual-${new Date().toISOString()}` }];
+  } else {
+    const picked = await pickTickets();
+    log(`Pickup: ${picked.found} ticket(s) match, ${picked.toTest} not yet tested this QA cycle. JQL: ${picked.jql}`);
+    tickets = picked.tickets;
+  }
+  const max = Number(env('QA_MAX_TICKETS_PER_RUN', '5'));
+  tickets = tickets.slice(0, max);
+  if (!tickets.length) return log('Nothing to test.');
+  if (dryRun) return log(`Dry run — would test: ${tickets.map((t) => t.key).join(', ')}`);
+
+  if (!ensureNetSuiteSession()) {
+    log('NetSuite login failed — no ticket was run. Check .env and logs/netsuite-login-failed_*.png.');
+    process.exitCode = 1;
+    return;
+  }
+
+  mkdirSync(LOGS, { recursive: true });
+  for (const ticket of tickets) {
+    const execId = nextExecutionId();
+    const name = `${execId}_${ticket.key}`;
+    const dir = join(REPO_ROOT, 'reports', name);
+    mkdirSync(join(dir, 'screenshots'), { recursive: true });
+    let ok = false;
+    let reason = '';
+    try {
+      ok = runClaude(ticket, execId, join(LOGS, `${name}.log`));
+      if (!ok) reason = `Claude exited with an error — see logs/${name}.log`;
+    } catch (e) {
+      reason = e.message;
+      log(`${execId} ${ticket.key}: ${reason}`);
+    }
+    const results = ensureResults(dir, ticket, execId, reason || `See logs/${name}.log`);
+    try {
+      await buildPdf([dir]);
+      log(`${execId} ${ticket.key}: report → reports/${name}/report.pdf`);
+    } catch (e) {
+      log(`${execId} ${ticket.key}: PDF failed — ${e.message}`);
+    }
+
+    // Record the tested cycle. Incomplete runs retry next time, up to QA_MAX_ATTEMPTS.
+    const state = readState();
+    const prev = state[ticket.key];
+    const attempts = prev && prev.cycle === ticket.cycle && !prev.complete ? (prev.attempts || 1) + 1 : 1;
+    const giveUp = !results.complete && attempts >= Number(env('QA_MAX_ATTEMPTS', '2'));
+    state[ticket.key] = {
+      cycle: results.complete || giveUp ? ticket.cycle : `retry:${ticket.cycle}`,
+      complete: Boolean(results.complete),
+      attempts,
+      executionId: execId,
+      report: `reports/${name}/report.pdf`,
+      testedAt: new Date().toISOString(),
+      bugs: (results.bugs || []).map((b) => b.key).filter(Boolean),
+    };
+    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    const counts = (results.testCases || []).reduce((a, t) => ((a[t.status] = (a[t.status] || 0) + 1), a), {});
+    log(`${execId} ${ticket.key}: ${results.complete ? 'complete' : giveUp ? 'incomplete — giving up for this cycle' : 'incomplete — will retry'} ${JSON.stringify(counts)}`);
+  }
+}
+
+main().catch((e) => {
+  log(`Pipeline error: ${e.message}`);
+  process.exit(1);
+});

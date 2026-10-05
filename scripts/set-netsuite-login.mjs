@@ -13,19 +13,53 @@ const ENV = join(REPO_ROOT, '.env');
 if (!existsSync(ENV)) copyFileSync(join(REPO_ROOT, '.env.example'), ENV);
 
 function ask(question, { hidden = false, fallback = '' } = {}) {
+  if (hidden && process.stdin.isTTY) return askHidden(question, fallback);
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    if (hidden) {
-      rl._writeToOutput = (s) => {
-        if (s.includes(question)) rl.output.write(s);
-        else if (!/[\r\n]/.test(s)) rl.output.write('*');
-      };
-    }
     rl.question(question, (answer) => {
       rl.close();
-      if (hidden) process.stdout.write('\n');
       resolve(answer.trim() || fallback);
     });
+  });
+}
+
+// Reads a line in raw mode and echoes one * per character, so pasted secrets never show.
+function askHidden(question, fallback) {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    let value = '';
+    process.stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.setEncoding('utf8');
+    stdin.resume();
+    const onData = (chunk) => {
+      for (const ch of chunk) {
+        if (ch === '\r' || ch === '\n') {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.off('data', onData);
+          process.stdout.write('\n');
+          resolve(value.trim() || fallback);
+          return;
+        }
+        if (ch === '\u0003') {
+          process.stdout.write('\n');
+          process.exit(130);
+        }
+        if (ch === '\u007f' || ch === '\b') {
+          if (value) {
+            value = value.slice(0, -1);
+            process.stdout.write('\b \b');
+          }
+          continue;
+        }
+        if (ch >= ' ') {
+          value += ch;
+          process.stdout.write('*');
+        }
+      }
+    };
+    stdin.on('data', onData);
   });
 }
 

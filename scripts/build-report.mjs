@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { marked } from 'marked';
-import { chromium } from 'playwright';
+import { launchBrowser } from '../lib/browser.mjs';
 import { REPO_ROOT, env } from '../lib/env.mjs';
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
@@ -92,6 +92,8 @@ function ticketSection(r) {
   return `<section class="ticket">
     <h2>${link(t.url, t.key)} — ${esc(t.summary)} ${badge(r.overall)}</h2>
     <table class="meta">
+      <tr><th>Execution</th><td><b>${esc(r.executionId || '—')}</b></td>
+          <th>Driver</th><td>${esc(r.driver || 'Playwright (headless)')}</td></tr>
       <tr><th>Ticket</th><td>${link(t.url, t.key)} (${esc(t.type)}, ${esc(t.priority || 'no priority')})</td>
           <th>Parent</th><td>${t.parentKey ? link(t.parentUrl, t.parentKey) : '—'}</td></tr>
       <tr><th>Environment</th><td>${esc(env_.name)} ${env_.url ? `(${link(env_.url)})` : ''}</td>
@@ -118,7 +120,7 @@ function summaryTable(results) {
   const rows = results
     .map((r) => {
       const c = counts(r);
-      return `<tr><td class="nowrap">${link(r.ticket?.url, r.ticket?.key)}</td><td>${esc(r.ticket?.summary)}</td><td>${badge(r.overall)}</td>
+      return `<tr><td class="nowrap">${esc(r.executionId || '')} ${link(r.ticket?.url, r.ticket?.key)}</td><td>${esc(r.ticket?.summary)}</td><td>${badge(r.overall)}</td>
         <td>${c.total}</td><td>${c.Passed}</td><td>${c.Failed}</td><td>${c.Blocked}</td>
         <td>${r.bugs.map((b) => link(b.url, b.key)).join(', ') || '—'}</td></tr>`;
     })
@@ -166,8 +168,9 @@ function html(results, title) {
 export async function buildPdf(folders, outPath, title) {
   const results = folders.map(loadResults);
   const out = outPath || join(results[0]._dir, 'report.pdf');
-  const docTitle = title || (results.length === 1 ? `QA Report — ${results[0].ticket?.key}` : 'QA Run Summary');
-  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  const one = results[0];
+  const docTitle = title || (results.length === 1 ? `QA Report — ${one.executionId ? `${one.executionId} · ` : ''}${one.ticket?.key}` : 'QA Run Summary');
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setContent(html(results, docTitle), { waitUntil: 'load' });

@@ -12,9 +12,10 @@
     "login": "node scripts/netsuite-login.mjs",
     "check:session": "node scripts/check-netsuite-session.mjs",
     "report": "node scripts/build-report.mjs",
-    "finalize": "node scripts/finalize-run.mjs",
     "test": "node --test tests/mcp-servers.test.mjs tests/linux-smoke.test.mjs",
-    "postinstall": "node scripts/link-netsuite-sessions.mjs"
+    "postinstall": "node scripts/link-netsuite-sessions.mjs",
+    "pipeline": "node scripts/run-pipeline.mjs",
+    "pick": "node scripts/pick-tickets.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
