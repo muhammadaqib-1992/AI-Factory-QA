@@ -4,11 +4,18 @@ Automated QA for NetSuite, driven by Jira. When a ticket reaches **Ready for QA*
 **`AI_FActory`** label and is assigned to the QA user, the pipeline — with nobody typing anything:
 
 1. reads everything on the ticket (description, acceptance criteria, comments),
-2. writes test cases from it → `test-cases/EXEC-NNNN_<KEY>.md`,
+2. writes test cases from it → `test-cases/<KEY>/EXEC-NNNN_<KEY>.md`,
 3. executes them **headless** in NetSuite with Playwright, a screenshot per step, and checks the
    saved records,
 4. files a **Sub-task bug under the ticket**, assigned to the bug assignee, for every failure,
-5. saves a **PDF report with the execution number** → `reports/EXEC-NNNN_<KEY>/report.pdf`.
+5. saves a **PDF report with the execution number** → `reports/<KEY>/EXEC-NNNN_<KEY>/report.pdf`
+   and comments the result on the ticket.
+
+**Then it watches those bugs.** When a developer moves a bug sub-task to **Ready for QA**, the
+pipeline retests it the same way (the failed cases + the bug's steps), saves the report under
+the **same ticket** (`reports/<KEY>/EXEC-NNNN_<BUG>/`), comments the result on the bug and the
+ticket, and **closes** the bug if everything passes or **reopens** it if it still fails. This
+repeats on every round until the bugs are closed.
 
 You can also work interactively: say **"execute these scripts"** in a Claude session in this
 folder and the cases you point at are run the same way.
@@ -44,19 +51,25 @@ scripts/run-pipeline.mjs
   │                         · label AI_FActory · not yet tested in this QA cycle
   ├─ check-netsuite-session.mjs ─ expired? → netsuite-login.mjs (headless, from .env, 2FA)
   ├─ next execution number ────── EXEC-0001, EXEC-0002, … (state/execution-counter.json)
-  ├─ claude -p "/qa-jira-pipeline <KEY> <EXEC>"   ← Claude Code, headless
-  │     ├─ Jira MCP ........ read the ticket, create Sub-task bugs
+  │                       + its own bug sub-tasks back in "Ready for QA" (label ai-qa-bug),
+  │                         once the parent ticket's first run has finished
+  ├─ claude -p "/qa-jira-pipeline <KEY> <EXEC>"                  ← first iteration
+  │  claude -p "/qa-jira-pipeline retest <BUG> <EXEC> <KEY>"     ← bug retest
+  │     ├─ Jira MCP ........ read tickets, create Sub-task bugs, comment, close / reopen bugs
   │     ├─ Playwright MCP .. drive NetSuite headless, screenshots
   │     └─ NetSuite MCP .... read records to verify (when signed in)
-  └─ build-report.mjs ──── reports/EXEC-NNNN_<KEY>/report.pdf
+  └─ build-report.mjs ──── reports/<KEY>/EXEC-NNNN_<KEY or BUG>/report.pdf
 ```
 
 - **QA cycle:** the moment a ticket last moved into *Ready for QA*. A ticket is tested once per
   cycle; if it goes back to development and returns, it is tested again.
 - **One run at a time** (lock file), **at most 5 tickets per run**, **45 min per ticket**. A run
   that does not finish is retried once, then left until the ticket's next QA cycle.
-- The pipeline **never changes the ticket's status**; it only adds bug sub-tasks (or comments on
-  an existing matching one).
+- The pipeline **never changes the parent ticket's status**. It adds bug sub-tasks and comments,
+  and moves **its own bugs** after a retest: all passed → `JIRA_CLOSE_STATUS` (*Done / Closed*),
+  any failed → `JIRA_REOPEN_STATUS` (*Reopen*).
+- Bugs are retested **only after the ticket's first run has finished**, and only the bugs the
+  pipeline filed (label `ai-qa-bug`).
 
 ## Setup on Linux
 
@@ -116,7 +129,8 @@ node scripts/check-netsuite-session.mjs
 |---|---|
 | `node scripts/run-pipeline.mjs` | One pipeline pass: pick tickets → test → bugs → PDFs |
 | `node scripts/run-pipeline.mjs --dry-run` | Show which tickets would be tested |
-| `node scripts/run-pipeline.mjs --ticket NU-4040` | Test one ticket now, whatever its status |
+| `node scripts/run-pipeline.mjs --ticket NU-4040` | First iteration for one ticket now, whatever its status |
+| `node scripts/run-pipeline.mjs --retest NU-4041 --parent NU-4040` | Retest one bug now |
 | `node scripts/pick-tickets.mjs [--all]` | List matching tickets (with `--all`, include ones already tested) |
 | `node scripts/build-report.mjs reports/<run>` | Rebuild a run's PDF |
 | `scripts/with-env.sh claude` | Interactive Claude session with `.env` loaded (Linux) |
@@ -149,13 +163,22 @@ Remove it with `schtasks /Delete /TN "AI-Factory-QA pipeline" /F`.
 
 | Path | Holds | In git |
 |---|---|---|
-| `test-cases/EXEC-NNNN_<KEY>.md` | Test cases the pipeline wrote from the ticket | yes |
-| `reports/EXEC-NNNN_<KEY>/report.pdf` | The report: execution number, ticket link, results per case, bugs with links, test cases, failure screenshots | yes |
-| `reports/EXEC-NNNN_<KEY>/results.json` | Machine-readable results (format: `.claude/skills/qa-test-execution/references/results-format.md`) | yes |
-| `reports/EXEC-NNNN_<KEY>/screenshots/` | One screenshot per step | yes |
+| `test-cases/<KEY>/EXEC-NNNN_<KEY or BUG>.md` | Test cases written for the ticket, and retest cases for its bugs | yes |
+| `reports/<KEY>/EXEC-NNNN_<KEY or BUG>/report.pdf` | The report: execution number, ticket link, results per case, bugs with links, retest outcome, test cases, failure screenshots | yes |
+| `reports/<KEY>/EXEC-NNNN_<KEY or BUG>/results.json` | Machine-readable results (format: `.claude/skills/qa-test-execution/references/results-format.md`) | yes |
+| `reports/<KEY>/EXEC-NNNN_<KEY or BUG>/screenshots/` | One screenshot per step | yes |
 | `logs/EXEC-NNNN_<KEY>.log`, `logs/pipeline.log` | What Claude and the runner did | no |
 | `state/execution-counter.json` | Last execution number used | no |
-| `state/processed-tickets.json` | Which QA cycle of each ticket was tested | no |
+| `state/processed-tickets.json` | Which QA cycle of each ticket/bug was tested, bugs filed per ticket, retest outcomes | no |
+
+Example after a full round on NU-4040:
+
+```
+reports/NU-4040/
+├── EXEC-0001_NU-4040/   first iteration — 1 failure → bug NU-4041 filed
+├── EXEC-0004_NU-4041/   retest of NU-4041 — still failing → reopened
+└── EXEC-0009_NU-4041/   retest of NU-4041 — passed → closed
+```
 | `.auth/` | NetSuite session and MCP tokens | no |
 
 ## Configuration (.env)
@@ -177,6 +200,8 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 | `JIRA_PICKUP_JQL` | Replaces all four pickup settings above | — |
 | `JIRA_BUG_ISSUE_TYPE` | Type of the bug filed under the ticket | `Sub-task` |
 | `JIRA_BUG_ASSIGNEE_ACCOUNT_ID` | Who bugs are assigned to | — |
+| `JIRA_BUG_LABEL` | Label on every bug the pipeline files (how it finds them for retest) | `ai-qa-bug` |
+| `JIRA_CLOSE_STATUS`, `JIRA_REOPEN_STATUS` | Bug status after a passed / failed retest | `Done / Closed`, `Reopen` |
 | `QA_MAX_TICKETS_PER_RUN`, `QA_TICKET_TIMEOUT_MIN`, `QA_MAX_ATTEMPTS` | Limits | `5`, `45`, `2` |
 | `CLAUDE_BIN`, `CLAUDE_MODEL` | Claude Code command and model | `claude`, CLI default |
 | `NETSUITE_CLIENT_ID`, `GITHUB_PERSONAL_ACCESS_TOKEN`, `GDRIVE_*` | Optional MCP servers | — |
@@ -226,6 +251,8 @@ knowledge-base/               project documents (local only) + committed indexes
 | `"claude" not found` | `npm install -g @anthropic-ai/claude-code` (or set `CLAUDE_BIN`) |
 | Pipeline says "Nothing to test" | Check the ticket: status *Ready for QA*, assigned to the signed-in Jira user, label `AI_FActory`; `node scripts/pick-tickets.mjs --all` shows what matches |
 | A ticket is never re-tested | It was tested in this QA cycle; move it out of and back into *Ready for QA*, or run `--ticket <KEY>` |
+| A bug in Ready for QA is not retested | It needs the `ai-qa-bug` label and a parent whose first run finished; or run `--retest <BUG> --parent <KEY>` |
+| Bug not closed / reopened after retest | The transition to `JIRA_CLOSE_STATUS` / `JIRA_REOPEN_STATUS` isn't available from its status — see the run's `results.json` notes |
 | Jira MCP asks to sign in again | `scripts/mcp-auth.sh jira` (tokens in `~/.mcp-auth` expired) |
 | `logs/netsuite-login-failed_*.png` | Screenshot of the page the login stopped on |
 

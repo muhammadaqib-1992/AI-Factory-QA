@@ -8,11 +8,15 @@
 //   3. gives each ticket the next execution number (EXEC-0001, EXEC-0002, …)
 //   4. runs Claude headless with the qa-jira-pipeline skill: ticket → test cases → execution →
 //      bugs → results.json
-//   5. builds reports/<EXEC>_<KEY>/report.pdf and records the tested cycle
+//   5. builds reports/<TICKET>/<EXEC>_<KEY>/report.pdf and records the tested cycle
+//   6. retests the bug sub-tasks it filed once developers move them back to Ready for QA
+//      (only after the ticket's first run finished): same process, report saved under the same
+//      ticket, result commented on the bug and the ticket, bug closed (pass) or reopened (fail)
 //
-//   node scripts/run-pipeline.mjs                 normal run
-//   node scripts/run-pipeline.mjs --ticket NU-1   run one ticket now, whatever its status
-//   node scripts/run-pipeline.mjs --dry-run       show what would run, run nothing
+//   node scripts/run-pipeline.mjs                              normal run
+//   node scripts/run-pipeline.mjs --ticket NU-1                first iteration for one ticket now
+//   node scripts/run-pipeline.mjs --retest NU-5 --parent NU-1  retest one bug now
+//   node scripts/run-pipeline.mjs --dry-run                    show what would run, run nothing
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,7 +29,10 @@ loadEnv(); // children (Claude, the MCP servers it starts) inherit .env through 
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
-const onlyTicket = args.includes('--ticket') ? args[args.indexOf('--ticket') + 1] : null;
+const argOf = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : null);
+const onlyTicket = argOf('--ticket');
+const onlyRetest = argOf('--retest');
+const retestParent = argOf('--parent');
 const STATE_DIR = join(REPO_ROOT, 'state');
 const LOCK = join(STATE_DIR, 'pipeline.lock');
 const COUNTER = join(STATE_DIR, 'execution-counter.json');
@@ -41,6 +48,8 @@ const ALLOWED_TOOLS = [
   'mcp__jira__getJiraIssueTypeMetaWithFields',
   'mcp__jira__createJiraIssue',
   'mcp__jira__addCommentToJiraIssue',
+  'mcp__jira__getTransitionsForJiraIssue',
+  'mcp__jira__transitionJiraIssue',
   'Read',
   'Write',
   'Edit',
@@ -96,10 +105,10 @@ function ensureNetSuiteSession() {
 function runClaude(ticket, execId, logFile) {
   const claude = env('CLAUDE_BIN', 'claude');
   const timeoutMin = Number(env('QA_TICKET_TIMEOUT_MIN', '45'));
-  const prompt = `/qa-jira-pipeline ${ticket.key} ${execId}`;
+  const prompt = ticket.mode === 'retest' ? `/qa-jira-pipeline retest ${ticket.key} ${execId} ${ticket.parentKey}` : `/qa-jira-pipeline ${ticket.key} ${execId}`;
   const cliArgs = ['-p', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', ALLOWED_TOOLS.join(','), '--output-format', 'text'];
   if (env('CLAUDE_MODEL', '')) cliArgs.push('--model', env('CLAUDE_MODEL'));
-  log(`${execId} ${ticket.key}: running Claude (timeout ${timeoutMin} min) → ${logFile.replace(REPO_ROOT, '.')}`);
+  log(`${execId} ${ticket.key}${ticket.mode === 'retest' ? ` (retest, parent ${ticket.parentKey})` : ''}: running Claude (timeout ${timeoutMin} min) → ${logFile.replace(REPO_ROOT, '.')}`);
   const r = spawnSync(claude, cliArgs, {
     cwd: REPO_ROOT,
     env: process.env,
@@ -130,7 +139,9 @@ function ensureResults(dir, ticket, execId, reason) {
     environment: { name: env('NETSUITE_ACCOUNT_ID', ''), url: '' },
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
-    testCasesFile: `test-cases/${execId}_${ticket.key}.md`,
+    testCasesFile: `test-cases/${ticket.parentKey}/${execId}_${ticket.key}.md`,
+    mode: ticket.mode,
+    ...(ticket.mode === 'retest' ? { retestOf: ticket.key, parentKey: ticket.parentKey } : {}),
     summary: 'The run ended before results were written.',
     testCases: [],
     bugs: [],
@@ -143,18 +154,24 @@ function ensureResults(dir, ticket, execId, reason) {
 async function main() {
   if (!dryRun) takeLock();
   let tickets;
+  const site = JIRA_SITE();
+  const manualCycle = `manual-${new Date().toISOString()}`;
   if (onlyTicket) {
-    const site = JIRA_SITE();
-    tickets = [{ key: onlyTicket, url: `https://${site}/browse/${onlyTicket}`, cycle: `manual-${new Date().toISOString()}` }];
+    tickets = [{ mode: 'test', key: onlyTicket, parentKey: onlyTicket, url: `https://${site}/browse/${onlyTicket}`, cycle: manualCycle }];
+  } else if (onlyRetest) {
+    if (!retestParent) throw new Error('--retest needs --parent <TICKET-KEY>');
+    tickets = [{ mode: 'retest', key: onlyRetest, parentKey: retestParent, url: `https://${site}/browse/${onlyRetest}`, cycle: manualCycle }];
   } else {
     const picked = await pickTickets();
-    log(`Pickup: ${picked.found} ticket(s) match, ${picked.toTest} not yet tested this QA cycle. JQL: ${picked.jql}`);
+    log(`Pickup: ${picked.found} ticket(s) and ${picked.bugsFound} bug(s) Ready for QA; ${picked.toTest} to run now.`);
+    log(`  tickets JQL: ${picked.jql}`);
+    if (picked.bugJql) log(`  bugs JQL:    ${picked.bugJql}`);
     tickets = picked.tickets;
   }
   const max = Number(env('QA_MAX_TICKETS_PER_RUN', '5'));
   tickets = tickets.slice(0, max);
   if (!tickets.length) return log('Nothing to test.');
-  if (dryRun) return log(`Dry run — would test: ${tickets.map((t) => t.key).join(', ')}`);
+  if (dryRun) return log(`Dry run — would run: ${tickets.map((t) => (t.mode === 'retest' ? `${t.key} (retest under ${t.parentKey})` : t.key)).join(', ')}`);
 
   if (!ensureNetSuiteSession()) {
     log('NetSuite login failed — no ticket was run. Check .env and logs/netsuite-login-failed_*.png.');
@@ -166,7 +183,9 @@ async function main() {
   for (const ticket of tickets) {
     const execId = nextExecutionId();
     const name = `${execId}_${ticket.key}`;
-    const dir = join(REPO_ROOT, 'reports', name);
+    const rel = `${ticket.parentKey}/${name}`; // every run of a ticket and its bugs sits under the ticket
+    const dir = join(REPO_ROOT, 'reports', ticket.parentKey, name);
+    mkdirSync(join(REPO_ROOT, 'test-cases', ticket.parentKey), { recursive: true });
     mkdirSync(join(dir, 'screenshots'), { recursive: true });
     let ok = false;
     let reason = '';
@@ -180,7 +199,7 @@ async function main() {
     const results = ensureResults(dir, ticket, execId, reason || `See logs/${name}.log`);
     try {
       await buildPdf([dir]);
-      log(`${execId} ${ticket.key}: report → reports/${name}/report.pdf`);
+      log(`${execId} ${ticket.key}: report → reports/${rel}/report.pdf`);
     } catch (e) {
       log(`${execId} ${ticket.key}: PDF failed — ${e.message}`);
     }
@@ -191,14 +210,24 @@ async function main() {
     const attempts = prev && prev.cycle === ticket.cycle && !prev.complete ? (prev.attempts || 1) + 1 : 1;
     const giveUp = !results.complete && attempts >= Number(env('QA_MAX_ATTEMPTS', '2'));
     state[ticket.key] = {
+      mode: ticket.mode,
+      parentKey: ticket.parentKey,
       cycle: results.complete || giveUp ? ticket.cycle : `retry:${ticket.cycle}`,
       complete: Boolean(results.complete),
       attempts,
       executionId: execId,
-      report: `reports/${name}/report.pdf`,
+      report: `reports/${rel}/report.pdf`,
       testedAt: new Date().toISOString(),
-      bugs: (results.bugs || []).map((b) => b.key).filter(Boolean),
+      // first iteration: bugs filed; retest: keep the parent's list untouched
+      bugs: ticket.mode === 'retest' ? prev?.bugs || [] : (results.bugs || []).map((b) => b.key).filter(Boolean),
+      ...(ticket.mode === 'retest' ? { outcome: results.bugTransition?.to || null } : {}),
     };
+    if (ticket.mode === 'retest' && state[ticket.parentKey]) {
+      // New bugs found while retesting join the parent's watch list.
+      const extra = (results.bugs || []).map((b) => b.key).filter((k) => k && k !== ticket.key);
+      state[ticket.parentKey].bugs = [...new Set([...(state[ticket.parentKey].bugs || []), ...extra])];
+      state[ticket.parentKey].retests = [...(state[ticket.parentKey].retests || []), { bug: ticket.key, executionId: execId, outcome: results.bugTransition?.to || null, at: new Date().toISOString() }];
+    }
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     const counts = (results.testCases || []).reduce((a, t) => ((a[t.status] = (a[t.status] || 0) + 1), a), {});
     log(`${execId} ${ticket.key}: ${results.complete ? 'complete' : giveUp ? 'incomplete — giving up for this cycle' : 'incomplete — will retry'} ${JSON.stringify(counts)}`);

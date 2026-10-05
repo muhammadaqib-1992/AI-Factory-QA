@@ -92,6 +92,7 @@ function ticketSection(r) {
   return `<section class="ticket">
     <h2>${link(t.url, t.key)} — ${esc(t.summary)} ${badge(r.overall)}</h2>
     <table class="meta">
+      ${r.retestOf ? `<tr><th>Retest</th><td colspan="3">Retest of bug ${link(t.url, r.retestOf)} under ticket ${link(t.url?.replace(/[^/]+$/, r.parentKey), r.parentKey)} → ${r.bugTransition?.to ? `bug moved to <b>${esc(r.bugTransition.to)}</b>` : 'bug status unchanged'}</td></tr>` : ''}
       <tr><th>Execution</th><td><b>${esc(r.executionId || '—')}</b></td>
           <th>Driver</th><td>${esc(r.driver || 'Playwright (headless)')}</td></tr>
       <tr><th>Ticket</th><td>${link(t.url, t.key)} (${esc(t.type)}, ${esc(t.priority || 'no priority')})</td>

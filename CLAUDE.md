@@ -13,7 +13,8 @@ expected vs. actual, reproduction steps, record ids, what "pass" means per the a
 | User says | Do |
 |---|---|
 | "execute these scripts", "execute", "run these test cases", "execute TC_…", "execute <JIRA-KEY>" | `qa-test-execution` — run every case headless now, screenshots, results.json, PDF |
-| nothing — a ticket reaches **Ready for QA** with label `AI_FActory`, assigned to the QA user | `scripts/run-pipeline.mjs` (scheduled) runs `qa-jira-pipeline`: test cases → execution → bugs → `reports/EXEC-NNNN_<KEY>/report.pdf` |
+| nothing — a ticket reaches **Ready for QA** with label `AI_FActory`, assigned to the QA user | `scripts/run-pipeline.mjs` (scheduled) runs `qa-jira-pipeline`: test cases → execution → bugs → `reports/<KEY>/EXEC-NNNN_<KEY>/report.pdf` |
+| nothing — one of the pipeline's bugs (label `ai-qa-bug`) returns to **Ready for QA** | retest: same process, report under the same ticket, bug **closed** (pass) or **reopened** (fail) |
 | "write test cases for …", "create TCs" | `qa-test-writing` — cases as `.md` in `test-cases/` |
 | "log a bug", a failed case from a Jira ticket | `qa-bug-reporting` |
 | a question about how something should work | `qa-context-lookup` first |
@@ -51,7 +52,7 @@ expected vs. actual, reproduction steps, record ids, what "pass" means per the a
 | Folder | Holds |
 |---|---|
 | `test-cases/` | `YYYY-MM-DD_<ID>_<slug>.md` — the cases |
-| `reports/EXEC-NNNN_<KEY>/` | pipeline runs: `results.json`, `screenshots/`, `report.pdf` (execution number from `state/execution-counter.json`) |
+| `reports/<KEY>/EXEC-NNNN_<KEY or BUG>/` | pipeline runs for a ticket and its bug retests: `results.json`, `screenshots/`, `report.pdf` |
 | `reports/<YYYY-MM-DD>_<ID>/` | runs you ask for in chat |
 | `logs/`, `state/`, `.auth/` | per-machine runtime files — git-ignored |
 

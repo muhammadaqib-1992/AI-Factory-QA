@@ -49,41 +49,76 @@ function enteredStatusAt(issue, status) {
   return latest;
 }
 
+// Bug sub-tasks the pipeline filed (recorded in state under their parent's first run, or
+// labelled JIRA_BUG_LABEL) that are now back in the ready status — i.e. ready for retest.
+export function bugRetestJql(state) {
+  const project = env('JIRA_PROJECT_KEY', 'NU');
+  const status = env('JIRA_READY_STATUS', 'Ready for QA');
+  const label = env('JIRA_BUG_LABEL', 'ai-qa-bug');
+  const known = [...new Set(Object.values(state).flatMap((s) => (s && s.complete && s.mode !== 'retest' ? s.bugs || [] : [])))];
+  const who = [label ? `labels = "${label}"` : '', known.length ? `key in (${known.join(', ')})` : ''].filter(Boolean).join(' OR ');
+  if (!who) return null;
+  return `project = ${project} AND status = "${status}" AND (${who}) ORDER BY updated ASC`;
+}
+
+async function collect(client, site, status, jql, mode, state, includeTested) {
+  const found = await callJira(client, 'searchJiraIssuesUsingJql', {
+    cloudId: site,
+    jql,
+    maxResults: 50,
+    fields: ['summary', 'issuetype', 'priority', 'labels', 'status', 'updated', 'parent'],
+  });
+  const issues = found?.issues || [];
+  const out = [];
+  for (const i of issues) {
+    const parentKey = i.fields?.parent?.key || null;
+    // A bug is retested only once its parent ticket's first run has finished.
+    if (mode === 'retest' && !(parentKey && state[parentKey]?.complete)) continue;
+    const full = await callJira(client, 'getJiraIssue', { cloudId: site, issueIdOrKey: i.key, fields: ['status'], expand: 'changelog' });
+    const issue = full?.issues?.nodes?.[0] || full;
+    const cycle = enteredStatusAt(issue, status) || i.fields?.updated || null;
+    const prior = state[i.key];
+    const tested = Boolean(prior && prior.cycle === cycle);
+    if (tested && !includeTested) continue;
+    out.push({
+      mode,
+      key: i.key,
+      parentKey: mode === 'retest' ? parentKey : i.key,
+      url: `https://${site}/browse/${i.key}`,
+      summary: i.fields?.summary,
+      type: i.fields?.issuetype?.name,
+      priority: i.fields?.priority?.name,
+      labels: i.fields?.labels,
+      cycle,
+      alreadyTested: tested,
+      lastRun: prior || null,
+    });
+  }
+  return { found: issues.length, tickets: out };
+}
+
+// Tickets to test now: first iterations for new Ready-for-QA tickets, then retests for the
+// pipeline's bugs that developers have moved back to Ready for QA.
 export async function pickTickets({ includeTested = false } = {}) {
   const site = JIRA_SITE();
   const status = env('JIRA_READY_STATUS', 'Ready for QA');
+  const state = readState();
   const jql = pickupJql();
+  const bugJql = bugRetestJql(state);
   const client = await connectJira({ quietAuth: true });
   try {
-    const found = await callJira(client, 'searchJiraIssuesUsingJql', {
-      cloudId: site,
+    const first = await collect(client, site, status, jql, 'test', state, includeTested);
+    const retest = bugJql ? await collect(client, site, status, bugJql, 'retest', state, includeTested) : { found: 0, tickets: [] };
+    const firstKeys = new Set(first.tickets.map((t) => t.key));
+    const tickets = [...first.tickets, ...retest.tickets.filter((t) => !firstKeys.has(t.key))];
+    return {
       jql,
-      maxResults: 50,
-      fields: ['summary', 'issuetype', 'priority', 'labels', 'status', 'updated'],
-    });
-    const issues = found?.issues || found?.issues?.nodes || [];
-    const state = readState();
-    const tickets = [];
-    for (const i of issues) {
-      const full = await callJira(client, 'getJiraIssue', { cloudId: site, issueIdOrKey: i.key, fields: ['status'], expand: 'changelog' });
-      const issue = full?.issues?.nodes?.[0] || full;
-      const cycle = enteredStatusAt(issue, status) || i.fields?.updated || null;
-      const prior = state[i.key];
-      const tested = Boolean(prior && prior.cycle === cycle);
-      if (tested && !includeTested) continue;
-      tickets.push({
-        key: i.key,
-        url: `https://${site}/browse/${i.key}`,
-        summary: i.fields?.summary,
-        type: i.fields?.issuetype?.name,
-        priority: i.fields?.priority?.name,
-        labels: i.fields?.labels,
-        cycle,
-        alreadyTested: tested,
-        lastRun: prior || null,
-      });
-    }
-    return { jql, found: issues.length, toTest: tickets.filter((t) => !t.alreadyTested).length, tickets };
+      bugJql,
+      found: first.found,
+      bugsFound: retest.found,
+      toTest: tickets.filter((t) => !t.alreadyTested).length,
+      tickets,
+    };
   } finally {
     await client.close().catch(() => {});
   }
