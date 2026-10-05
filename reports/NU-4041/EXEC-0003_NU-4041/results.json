@@ -1,0 +1,146 @@
+{
+  "executionId": "EXEC-0003",
+  "mode": "test",
+  "complete": true,
+  "ticket": {
+    "key": "NU-4041",
+    "summary": "Test ai factory (Create a Sales Order)",
+    "type": "Task",
+    "priority": "Medium",
+    "url": "https://folio3.atlassian.net/browse/NU-4041",
+    "statusEnteredAt": null
+  },
+  "environment": {
+    "name": "TSTDRV2142416 (F3 REM Integration [Dev Integration Account])",
+    "url": "https://tstdrv2142416.app.netsuite.com"
+  },
+  "role": "Administrator",
+  "driver": "Playwright script on the saved session (headless Chrome)",
+  "startedAt": "2026-10-05T21:08:53.081Z",
+  "finishedAt": "2026-10-05T21:11:23.036Z",
+  "testCasesFile": "test-cases/NU-4041/EXEC-0003_NU-4041.md",
+  "summary": "All 7 test cases passed: Sales Order #2446 saved for Alpine Partners 2 with the expected subsidiary, status, item line and totals; saving without a customer or without an item line was blocked.",
+  "testCases": [
+    {
+      "id": "TC_NU-4041_01",
+      "title": "Sales Order saves for an existing customer with one item",
+      "status": "Passed",
+      "actual": "Form opened with Order # 'To Be Generated'; customer Alpine Partners 2 set; 1 line added; Save showed 'Transaction successfully Saved'; Order #2446 generated (internal id 101799), customer Alpine Partners 2.",
+      "records": [
+        {
+          "type": "salesorder",
+          "id": "101799",
+          "number": "2446",
+          "url": "https://tstdrv2142416.app.netsuite.com/app/accounting/transactions/salesord.nl?id=101799"
+        }
+      ],
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_01_new-form.png",
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_02_customer-set.png",
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_03_item-added.png",
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_04_saved.png"
+      ],
+      "bugs": []
+    },
+    {
+      "id": "TC_NU-4041_02",
+      "title": "Subsidiary defaults from the customer",
+      "status": "Passed",
+      "actual": "Subsidiary on order #2446 = HEADQUARTERS.",
+      "records": [
+        {
+          "type": "salesorder",
+          "id": "101799",
+          "number": "2446",
+          "url": "https://tstdrv2142416.app.netsuite.com/app/accounting/transactions/salesord.nl?id=101799"
+        }
+      ],
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_04_saved.png"
+      ],
+      "bugs": []
+    },
+    {
+      "id": "TC_NU-4041_03",
+      "title": "Status of the new order is Pending Fulfillment",
+      "status": "Passed",
+      "actual": "Status on order #2446 = Pending Fulfillment.",
+      "records": [
+        {
+          "type": "salesorder",
+          "id": "101799",
+          "number": "2446",
+          "url": "https://tstdrv2142416.app.netsuite.com/app/accounting/transactions/salesord.nl?id=101799"
+        }
+      ],
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_04_saved.png"
+      ],
+      "bugs": []
+    },
+    {
+      "id": "TC_NU-4041_04",
+      "title": "Item line holds the right item, quantity, rate and amount",
+      "status": "Passed",
+      "actual": "Exactly one line: BEDROOM : Platform Bed, Quantity 1, Rate 1,280.00, Amount 1,280.00 (price level RRP, tax code -Not Taxable-).",
+      "records": [
+        {
+          "type": "salesorder",
+          "id": "101799",
+          "number": "2446",
+          "url": "https://tstdrv2142416.app.netsuite.com/app/accounting/transactions/salesord.nl?id=101799"
+        }
+      ],
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_04_02_item-line-full-width.png"
+      ],
+      "bugs": []
+    },
+    {
+      "id": "TC_NU-4041_05",
+      "title": "Order totals",
+      "status": "Passed",
+      "actual": "Subtotal 1,280.00; Tax Total 0.00; Total 1,280.00.",
+      "records": [
+        {
+          "type": "salesorder",
+          "id": "101799",
+          "number": "2446",
+          "url": "https://tstdrv2142416.app.netsuite.com/app/accounting/transactions/salesord.nl?id=101799"
+        }
+      ],
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_01_04_saved.png"
+      ],
+      "bugs": []
+    },
+    {
+      "id": "TC_NU-4041_06",
+      "title": "Order cannot be saved without a customer",
+      "status": "Passed",
+      "actual": "Save blocked by NetSuite alert: 'Please enter value(s) for: Customer, Subsidiary'. No record created (no id in URL).",
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_06_01_new-form-no-customer.png",
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_06_02_save-blocked.png"
+      ],
+      "bugs": []
+    },
+    {
+      "id": "TC_NU-4041_07",
+      "title": "Order cannot be saved without an item line",
+      "status": "Passed",
+      "actual": "Customer set, 0 item lines; Save blocked by NetSuite alert: 'You must enter at least one line item for this transaction.'. No record created (no id in URL).",
+      "evidence": [
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_07_01_customer-no-items.png",
+        "reports/NU-4041/EXEC-0003_NU-4041/screenshots/TC_NU-4041_07_02_save-blocked.png"
+      ],
+      "bugs": []
+    }
+  ],
+  "bugs": [],
+  "notes": [
+    "Created during the run: Sales Order #2446 (internal id 101799) — https://tstdrv2142416.app.netsuite.com/app/accounting/transactions/salesord.nl?id=101799",
+    "AC 8: NetSuite's message names both Customer and Subsidiary (subsidiary is sourced from the customer).",
+    "Executions EXEC-0001 and EXEC-0002 did not run any case (Claude CLI was not installed); this is the first real execution."
+  ]
+}

@@ -154,8 +154,28 @@ function ensureResults(dir, ticket, execId, reason) {
   return r;
 }
 
+// Claude Code CLI must be installed and runnable before any ticket is touched — otherwise every
+// ticket would burn an execution number on an empty, incomplete run.
+function checkClaude() {
+  const claude = env('CLAUDE_BIN', 'claude');
+  const r = spawnSync(claude, ['--version'], { encoding: 'utf8', timeout: 60000, shell: process.platform === 'win32' });
+  const out = `${r.stdout || ''}${r.stderr || ''}`.trim();
+  const first = out.split(/\r?\n/)[0];
+  if (r.status === 0) return first;
+  throw new Error(
+    [
+      `Claude Code CLI not available ("${claude} --version" failed: ${first || r.error?.message || 'not found'}).`,
+      '  Install it:   npm install -g @anthropic-ai/claude-code',
+      '  Sign in once: run  claude  in a terminal (or set ANTHROPIC_API_KEY in .env), then run the pipeline again.',
+    ].join('\n'),
+  );
+}
+
 async function main() {
-  if (!dryRun) takeLock();
+  if (!dryRun) {
+    log(`Claude Code: ${checkClaude()}`);
+    takeLock();
+  }
   let tickets;
   const site = JIRA_SITE();
   const manualCycle = `manual-${new Date().toISOString()}`;

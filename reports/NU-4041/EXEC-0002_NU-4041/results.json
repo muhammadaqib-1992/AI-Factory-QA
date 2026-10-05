@@ -1,0 +1,23 @@
+{
+  "executionId": "EXEC-0002",
+  "complete": false,
+  "ticket": {
+    "key": "NU-4041",
+    "url": "https://folio3.atlassian.net/browse/NU-4041",
+    "statusEnteredAt": "manual-2026-10-05T21:00:27.388Z"
+  },
+  "environment": {
+    "name": "TSTDRV2142416",
+    "url": ""
+  },
+  "startedAt": "2026-10-05T21:01:09.293Z",
+  "finishedAt": "2026-10-05T21:01:09.293Z",
+  "testCasesFile": "test-cases/NU-4041/EXEC-0002_NU-4041.md",
+  "mode": "test",
+  "summary": "The run ended before results were written.",
+  "testCases": [],
+  "bugs": [],
+  "notes": [
+    "Claude exited with an error — see logs/EXEC-0002_NU-4041.log"
+  ]
+}

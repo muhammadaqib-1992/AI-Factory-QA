@@ -36,7 +36,7 @@ reports/_attachments/
 
 # Tooling run artefacts — regenerate rather than commit.
 # (test-cases/, reports/ and bug-evidence/ ARE tracked — they are the team's QA record.)
-screenshots/
+/screenshots/
 test-results/
 playwright-report/
 
