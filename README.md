@@ -83,6 +83,8 @@ scripts/run-pipeline.mjs
 
 ## Setup on Linux
 
+> **Step-by-step guide with checks after every step: [docs/LINUX-SETUP.md](docs/LINUX-SETUP.md).**
+
 Prerequisites: **Node.js 20+**, **git**, a normal (non-root) user with `sudo` for installing
 system libraries.
 
