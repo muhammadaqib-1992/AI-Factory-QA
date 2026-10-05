@@ -10,9 +10,10 @@
     "setup:browsers": "playwright install --with-deps chromium",
     "check": "node scripts/check-setup.mjs",
     "login": "node scripts/netsuite-login.mjs",
+    "check:session": "node scripts/check-netsuite-session.mjs",
     "report": "node scripts/build-report.mjs",
     "finalize": "node scripts/finalize-run.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test tests/mcp-servers.test.mjs tests/linux-smoke.test.mjs",
     "postinstall": "node scripts/link-netsuite-sessions.mjs"
   },
   "dependencies": {

@@ -7,7 +7,7 @@
         "--no-install",
         "playwright-mcp",
         "--headless",
-        "--browser", "chromium",
+        "--browser", "${PLAYWRIGHT_BROWSER:-chromium}",
         "--isolated",
         "--storage-state", ".auth/netsuite-state.json",
         "--output-dir", "logs/playwright",

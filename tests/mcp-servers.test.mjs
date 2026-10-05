@@ -93,6 +93,7 @@ async function connect(script) {
       JIRA_BUG_LABELS: 'qa-automation',
       JIRA_PICKUP_JQL: '',
       NS_ACCOUNT_ID: '123456-sb2',
+      NETSUITE_ACCOUNT_ID: '123456-sb2',
       NS_REST_URL: baseUrl,
       NS_CONSUMER_KEY: 'ck',
       NS_CONSUMER_SECRET: 'cs',
