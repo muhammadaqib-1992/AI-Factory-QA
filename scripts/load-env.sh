@@ -8,7 +8,7 @@
 _env_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.env"
 if [ ! -f "$_env_file" ]; then
   echo "No .env file. Create it first:  cp .env.example .env && chmod 600 .env" >&2
-  return 1 2>/dev/null || exit 1
+  return 1  # this file is always sourced
 fi
 
 while IFS= read -r _line || [ -n "$_line" ]; do

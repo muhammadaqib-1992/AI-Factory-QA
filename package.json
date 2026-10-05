@@ -12,7 +12,7 @@
     "login": "node scripts/netsuite-login.mjs",
     "report": "node scripts/build-report.mjs",
     "finalize": "node scripts/finalize-run.mjs",
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "postinstall": "node scripts/link-netsuite-sessions.mjs"
   },
   "dependencies": {
