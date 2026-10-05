@@ -49,7 +49,7 @@ cd QA_Agentic_Workspace
 
 `CLAUDE.md` and the skills load automatically — there is nothing to activate.
 
-✅ **Check:** type `/skills` (CLI) or open the skills menu (desktop). You should see the six `qa-*` skills: `qa-context-lookup`, `qa-test-writing`, `qa-test-execution`, `qa-permission-testing`, `qa-bug-reporting`, `qa-kb-sync`.
+✅ **Check:** type `/skills` (CLI) or open the skills menu (desktop). You should see the seven `qa-*` skills: `qa-context-lookup`, `qa-user-stories`, `qa-test-writing`, `qa-test-execution`, `qa-permission-testing`, `qa-bug-reporting`, `qa-kb-sync`.
 
 ### Step 3 — Create your personal environment file
 
@@ -147,10 +147,11 @@ Worth knowing:
 
 ### Step 8 — Match the formats to your team (optional but worth it)
 
-The skills ship with sensible defaults. Adapt these three to match what your team already uses:
+The skills ship with sensible defaults. Adapt these to match what your team already uses:
 
 | File | Change it to match |
 |---|---|
+| `.claude/skills/qa-user-stories/references/user-story-format.md` | Your story template, and the default Jira assignee |
 | `.claude/skills/qa-test-writing/references/test-case-format.md` | Your test-case sheet's columns |
 | `.claude/skills/qa-bug-reporting/references/priority-and-labels.md` | Your tracker's priorities and labels |
 | `knowledge-base/reference-data/permissions-matrix.csv` | Add your roles × features matrix here — see the skill's `references/matrix-guide.md` for the expected shape |
@@ -176,20 +177,22 @@ Ask in plain language — the right skill loads on its own. A good first run, on
 | # | You say | What happens |
 |---|---|---|
 | 1 | *"How is <feature> supposed to work?"* | **qa-context-lookup** answers from the knowledge base and cites its source |
-| 2 | *"Write test cases for <feature>"* | **qa-test-writing** drafts them in your format, in chat, marking anything inferred |
-| 3 | *"Execute TC_XXX_001 on staging"* | **qa-test-execution** drives the browser, checks the backend, returns pass/fail with real values |
-| 4 | *"Can <role> see <data>?"* | **qa-permission-testing** checks matrix → live config → actual behaviour |
-| 5 | *"Draft a bug for this"* | **qa-bug-reporting** writes it in your format and **waits** |
-| 6 | *"Create it"* | Only now is the defect filed in your tracker |
+| 2 | *"Create user stories for <feature>"* | **qa-user-stories** drafts them from the solution document, in chat, and **waits** before writing files or raising Jira tickets |
+| 3 | *"Write test cases for <feature>"* | **qa-test-writing** drafts them in your format, in chat, marking anything inferred |
+| 4 | *"Execute TC_XXX_001 on staging"* | **qa-test-execution** drives the browser, checks the backend, returns pass/fail with real values |
+| 5 | *"Can <role> see <data>?"* | **qa-permission-testing** checks matrix → live config → actual behaviour |
+| 6 | *"Draft a bug for this"* | **qa-bug-reporting** writes it in your format and **waits** |
+| 7 | *"Create it"* | Only now is the defect filed in your tracker |
 
-✅ **Check:** nothing reached your tracker until step 6. That is by design — **drafts always come before writes**.
+✅ **Check:** nothing reached your tracker until step 7. That is by design — **drafts always come before writes**.
 
 ### Where your work gets saved
 
-You don't have to file anything by hand — the skills write into three folders, all tracked in git so the team shares one record. Each folder's `README.md` has the full convention.
+You don't have to file anything by hand — the skills write into four folders, all tracked in git so the team shares one record. Each folder's `README.md` has the full convention.
 
 | Folder | What lands there | Named |
 |---|---|---|
+| `user-stories/` | User stories, once you approve the draft | `2026-10-05_US_PDP_001_live-stock-on-product-page.md` |
 | `test-cases/` | Test cases, once you approve the draft | `2026-09-12_PDP_inventory-block.md` |
 | `reports/` | One execution or permission-test report per run | `2026-09-12_TC_PDP_002_sandbox.md` |
 | `bug-evidence/` | One folder per defect: screenshots, logs, the draft | `DRAFT_2026-09-12_price-not-refreshed/` → renamed to the ticket id once filed |
@@ -225,12 +228,12 @@ The sections below are the reference detail behind these steps.
 
 | | |
 |---|---|
-| **6 skills** | Research, test-case writing, test execution, permission testing, defect reporting, knowledge-base sync |
+| **7 skills** | Research, user stories, test-case writing, test execution, permission testing, defect reporting, knowledge-base sync |
 | **Weekly Drive sync** | `qa-kb-sync` pulls new/changed Google Drive documents every Monday and updates the indexes — documents stay local, never in git |
 | **Knowledge base** | Indexed folders for solution docs, technical design, requirements, contracts, call recordings, reference data |
 | **Guardrails** | Claude hook + git pre-commit hook: credentials, HAR captures and project documents can't be committed. SessionStart hook reports setup status |
 | **1 custom subagent** | Correctly wired for delegated research (subagents don't inherit skills — this shows how) |
-| **Work folders** | `test-cases/`, `reports/`, `bug-evidence/` — date-stamped records the skills write to as you work |
+| **Work folders** | `user-stories/`, `test-cases/`, `reports/`, `bug-evidence/` — date-stamped records the skills write to as you work |
 | **Validator** | `scripts/validate_skills.py` checks every skill against the spec limits |
 
 ### Built to stay cheap
@@ -315,8 +318,9 @@ This is the part that decides whether the workspace is useful or generic.
 
 `knowledge-base/README.md` has the routing map and explains what belongs where.
 
-**Adapt the skills.** The five in `.claude/skills/` are working defaults. The parts most worth editing:
+**Adapt the skills.** The seven in `.claude/skills/` are working defaults. The parts most worth editing:
 
+- `qa-user-stories/references/user-story-format.md` — match your story template and default assignee
 - `qa-test-writing/references/test-case-format.md` — match your tracker's columns
 - `qa-bug-reporting/references/priority-and-labels.md` — match your priority scheme
 - `qa-permission-testing` — point the lookup script at your real matrix
@@ -374,6 +378,7 @@ QA_Agentic_Workspace/
 │   │   └── session-start-check.sh   # SessionStart — primes each session
 │   └── skills/
 │       ├── qa-context-lookup/       # + references/
+│       ├── qa-user-stories/         # + references/user-story-format.md
 │       ├── qa-test-writing/         # + references/test-case-format.md
 │       ├── qa-test-execution/       # + references/report-format.md
 │       ├── qa-permission-testing/   # + references/ + scripts/lookup_permission.py
@@ -387,6 +392,7 @@ QA_Agentic_Workspace/
 │   ├── contracts/               #   SOW, contractual scope
 │   ├── call-recordings/         #   transcripts + the mandatory INDEX.md
 │   └── reference-data/          #   permission matrices, config exports, test data
+├── user-stories/                # Approved user stories — one date-stamped file per story
 ├── test-cases/                  # Approved test cases — one date-stamped file per batch
 ├── reports/                     # Execution & permission-test reports — date-stamped, one per run
 ├── bug-evidence/                # One folder per defect: screenshots, recordings, logs, draft

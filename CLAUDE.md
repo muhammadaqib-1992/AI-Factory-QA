@@ -19,6 +19,7 @@
 | Skill | Use for |
 |---|---|
 | `qa-context-lookup` | The research step behind every answer — knowledge base index first, source documents only when the index points at one. Runs automatically. |
+| `qa-user-stories` | Extracting user stories from the solution document into `user-stories/`, and raising each as a Jira Task. Draft in chat, files on approval, tickets on a second confirmation. |
 | `qa-test-writing` | Turning requirements/acceptance criteria into atomic test cases. Draft in chat only. |
 | `qa-test-execution` | Executing a test case against the application, with backend verification; pass/fail report. |
 | `qa-permission-testing` | Role/permission testing — documented matrix vs. live configuration vs. actual behaviour. |
@@ -45,6 +46,7 @@ Anything that drives the browser stays in the main thread: there is one shared b
 
 | Folder | Holds | Naming |
 |---|---|---|
+| `user-stories/` | Approved user stories, one file per story | `YYYY-MM-DD_<US-id>_<slug>.md` |
 | `test-cases/` | Approved test cases | `YYYY-MM-DD_<ShortCode>_<slug>.md` |
 | `reports/` | Execution and permission-test reports | `YYYY-MM-DD_<TC-id>_<env>.md` |
 | `bug-evidence/` | Screenshots, recordings, logs per defect | `DRAFT_YYYY-MM-DD_<slug>/` → `<TRACKER-ID>_<slug>/` once filed |
