@@ -17,6 +17,10 @@ the **same ticket** (`reports/<KEY>/EXEC-NNNN_<BUG>/`), comments the result on t
 ticket, and **closes** the bug if everything passes or **reopens** it if it still fails. This
 repeats on every round until the bugs are closed.
 
+**Finally it closes the task.** As soon as a ticket's QA is complete — every case passed on the
+first run, or every bug the pipeline filed for it is closed — the ticket itself is moved to
+**Done / Closed** with a comment saying why.
+
 You can also work interactively: say **"execute these scripts"** in a Claude session in this
 folder and the cases you point at are run the same way.
 
@@ -58,16 +62,22 @@ scripts/run-pipeline.mjs
   │     ├─ Jira MCP ........ read tickets, create Sub-task bugs, comment, close / reopen bugs
   │     ├─ Playwright MCP .. drive NetSuite headless, screenshots
   │     └─ NetSuite MCP .... read records to verify (when signed in)
-  └─ build-report.mjs ──── reports/<KEY>/EXEC-NNNN_<KEY or BUG>/report.pdf
+  ├─ build-report.mjs ──── reports/<KEY>/EXEC-NNNN_<KEY or BUG>/report.pdf
+  └─ close-completed.mjs ─ ticket → Done / Closed once all cases passed or all its bugs closed
+                           (checked every run, also catches bugs closed by hand)
 ```
 
 - **QA cycle:** the moment a ticket last moved into *Ready for QA*. A ticket is tested once per
   cycle; if it goes back to development and returns, it is tested again.
 - **One run at a time** (lock file), **at most 5 tickets per run**, **45 min per ticket**. A run
   that does not finish is retried once, then left until the ticket's next QA cycle.
-- The pipeline **never changes the parent ticket's status**. It adds bug sub-tasks and comments,
-  and moves **its own bugs** after a retest: all passed → `JIRA_CLOSE_STATUS` (*Done / Closed*),
-  any failed → `JIRA_REOPEN_STATUS` (*Reopen*).
+- Status changes the pipeline makes:
+  - **its own bugs** after a retest: all passed → `JIRA_CLOSE_STATUS` (*Done / Closed*), any
+    failed → `JIRA_REOPEN_STATUS` (*Reopen*);
+  - **the ticket** → *Done / Closed* when QA is complete: the first run's cases are all Passed,
+    or every failed case has a bug and every bug the pipeline filed (including ones found during
+    retests) is closed. A Blocked case, a failure without a bug, or an incomplete run keeps the
+    ticket open. Turn this off with `QA_CLOSE_PARENT=false`.
 - Bugs are retested **only after the ticket's first run has finished**, and only the bugs the
   pipeline filed (label `ai-qa-bug`).
 
@@ -131,6 +141,7 @@ node scripts/check-netsuite-session.mjs
 | `node scripts/run-pipeline.mjs --dry-run` | Show which tickets would be tested |
 | `node scripts/run-pipeline.mjs --ticket NU-4040` | First iteration for one ticket now, whatever its status |
 | `node scripts/run-pipeline.mjs --retest NU-4041 --parent NU-4040` | Retest one bug now |
+| `node scripts/close-completed.mjs [KEY] [--dry-run]` | Close tickets whose QA is complete (the runner does this every run) |
 | `node scripts/pick-tickets.mjs [--all]` | List matching tickets (with `--all`, include ones already tested) |
 | `node scripts/build-report.mjs reports/<run>` | Rebuild a run's PDF |
 | `scripts/with-env.sh claude` | Interactive Claude session with `.env` loaded (Linux) |
@@ -177,7 +188,7 @@ Example after a full round on NU-4040:
 reports/NU-4040/
 ├── EXEC-0001_NU-4040/   first iteration — 1 failure → bug NU-4041 filed
 ├── EXEC-0004_NU-4041/   retest of NU-4041 — still failing → reopened
-└── EXEC-0009_NU-4041/   retest of NU-4041 — passed → closed
+└── EXEC-0009_NU-4041/   retest of NU-4041 — passed → closed      ⇒ NU-4040 moved to Done / Closed
 ```
 | `.auth/` | NetSuite session and MCP tokens | no |
 
@@ -201,7 +212,8 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 | `JIRA_BUG_ISSUE_TYPE` | Type of the bug filed under the ticket | `Sub-task` |
 | `JIRA_BUG_ASSIGNEE_ACCOUNT_ID` | Who bugs are assigned to | — |
 | `JIRA_BUG_LABEL` | Label on every bug the pipeline files (how it finds them for retest) | `ai-qa-bug` |
-| `JIRA_CLOSE_STATUS`, `JIRA_REOPEN_STATUS` | Bug status after a passed / failed retest | `Done / Closed`, `Reopen` |
+| `JIRA_CLOSE_STATUS`, `JIRA_REOPEN_STATUS` | Status for a passed / failed bug retest; `JIRA_CLOSE_STATUS` is also used to close the ticket | `Done / Closed`, `Reopen` |
+| `QA_CLOSE_PARENT` | Close the ticket automatically when its QA is complete | `true` |
 | `QA_MAX_TICKETS_PER_RUN`, `QA_TICKET_TIMEOUT_MIN`, `QA_MAX_ATTEMPTS` | Limits | `5`, `45`, `2` |
 | `CLAUDE_BIN`, `CLAUDE_MODEL` | Claude Code command and model | `claude`, CLI default |
 | `NETSUITE_CLIENT_ID`, `GITHUB_PERSONAL_ACCESS_TOKEN`, `GDRIVE_*` | Optional MCP servers | — |
@@ -252,6 +264,7 @@ knowledge-base/               project documents (local only) + committed indexes
 | Pipeline says "Nothing to test" | Check the ticket: status *Ready for QA*, assigned to the signed-in Jira user, label `AI_FActory`; `node scripts/pick-tickets.mjs --all` shows what matches |
 | A ticket is never re-tested | It was tested in this QA cycle; move it out of and back into *Ready for QA*, or run `--ticket <KEY>` |
 | A bug in Ready for QA is not retested | It needs the `ai-qa-bug` label and a parent whose first run finished; or run `--retest <BUG> --parent <KEY>` |
+| Ticket not closed although its bugs are | `node scripts/close-completed.mjs <KEY> --dry-run` prints the reason (blocked case, failure without a bug, a bug still open) |
 | Bug not closed / reopened after retest | The transition to `JIRA_CLOSE_STATUS` / `JIRA_REOPEN_STATUS` isn't available from its status — see the run's `results.json` notes |
 | Jira MCP asks to sign in again | `scripts/mcp-auth.sh jira` (tokens in `~/.mcp-auth` expired) |
 | `logs/netsuite-login-failed_*.png` | Screenshot of the page the login stopped on |

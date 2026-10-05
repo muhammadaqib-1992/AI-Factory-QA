@@ -9,6 +9,8 @@
 //   4. runs Claude headless with the qa-jira-pipeline skill: ticket → test cases → execution →
 //      bugs → results.json
 //   5. builds reports/<TICKET>/<EXEC>_<KEY>/report.pdf and records the tested cycle
+//   7. closes a ticket (JIRA_CLOSE_STATUS) once its QA is complete: every case passed, or every
+//      bug it filed is closed (scripts/close-completed.mjs) — checked on every run
 //   6. retests the bug sub-tasks it filed once developers move them back to Ready for QA
 //      (only after the ticket's first run finished): same process, report saved under the same
 //      ticket, result commented on the bug and the ticket, bug closed (pass) or reopened (fail)
@@ -23,6 +25,7 @@ import { join } from 'node:path';
 import { REPO_ROOT, env, loadEnv } from '../lib/env.mjs';
 import { JIRA_SITE } from '../lib/jira-mcp-client.mjs';
 import { buildPdf } from './build-report.mjs';
+import { closeCompleted } from './close-completed.mjs';
 import { STATE_FILE, pickTickets, readState } from './pick-tickets.mjs';
 
 loadEnv(); // children (Claude, the MCP servers it starts) inherit .env through process.env
@@ -170,7 +173,11 @@ async function main() {
   }
   const max = Number(env('QA_MAX_TICKETS_PER_RUN', '5'));
   tickets = tickets.slice(0, max);
-  if (!tickets.length) return log('Nothing to test.');
+  if (!tickets.length) {
+    log('Nothing to test.');
+    if (!dryRun) await closeCompleted({ log: (m) => log(`close check: ${m}`) });
+    return;
+  }
   if (dryRun) return log(`Dry run — would run: ${tickets.map((t) => (t.mode === 'retest' ? `${t.key} (retest under ${t.parentKey})` : t.key)).join(', ')}`);
 
   if (!ensureNetSuiteSession()) {
@@ -217,6 +224,7 @@ async function main() {
       attempts,
       executionId: execId,
       report: `reports/${rel}/report.pdf`,
+      firstReport: ticket.mode === 'retest' ? prev?.firstReport : `reports/${rel}/report.pdf`,
       testedAt: new Date().toISOString(),
       // first iteration: bugs filed; retest: keep the parent's list untouched
       bugs: ticket.mode === 'retest' ? prev?.bugs || [] : (results.bugs || []).map((b) => b.key).filter(Boolean),
@@ -232,6 +240,9 @@ async function main() {
     const counts = (results.testCases || []).reduce((a, t) => ((a[t.status] = (a[t.status] || 0) + 1), a), {});
     log(`${execId} ${ticket.key}: ${results.complete ? 'complete' : giveUp ? 'incomplete — giving up for this cycle' : 'incomplete — will retry'} ${JSON.stringify(counts)}`);
   }
+
+  // Close tickets whose QA is now complete (all passed, or all their bugs closed).
+  await closeCompleted({ log: (m) => log(`close check: ${m}`) });
 }
 
 main().catch((e) => {

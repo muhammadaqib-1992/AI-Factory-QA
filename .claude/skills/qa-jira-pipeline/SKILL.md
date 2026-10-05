@@ -151,5 +151,6 @@ Record it in results.json: `"bugTransition": {"from": "<status>", "to": "<status
 ## Finish (both modes)
 
 End with a short plain-text summary for the run log: ticket, mode, execution id, counts per
-status, bugs filed / transitions made with links, PDF path, anything blocked. Never change the
-parent ticket's status.
+status, bugs filed / transitions made with links, PDF path, anything blocked. Do not change the
+parent ticket's status yourself — `scripts/close-completed.mjs` (run by the runner after every
+pass) moves it to `JIRA_CLOSE_STATUS` once every case passed or every bug it filed is closed.

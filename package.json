@@ -1,7 +1,7 @@
 {
   "name": "ai-factory-qa",
   "private": true,
-  "description": "Headless Jira → test cases → Playwright/NetSuite execution → bugs → PDF report pipeline for Claude Code.",
+  "description": "Headless Jira \u00e2\u2020\u2019 test cases \u00e2\u2020\u2019 Playwright/NetSuite execution \u00e2\u2020\u2019 bugs \u00e2\u2020\u2019 PDF report pipeline for Claude Code.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -12,10 +12,11 @@
     "login": "node scripts/netsuite-login.mjs",
     "check:session": "node scripts/check-netsuite-session.mjs",
     "report": "node scripts/build-report.mjs",
-    "test": "node --test tests/mcp-servers.test.mjs tests/linux-smoke.test.mjs",
+    "test": "node --test tests/mcp-servers.test.mjs tests/linux-smoke.test.mjs tests/close-completed.test.mjs",
     "postinstall": "node scripts/link-netsuite-sessions.mjs",
     "pipeline": "node scripts/run-pipeline.mjs",
-    "pick": "node scripts/pick-tickets.mjs"
+    "pick": "node scripts/pick-tickets.mjs",
+    "close": "node scripts/close-completed.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
