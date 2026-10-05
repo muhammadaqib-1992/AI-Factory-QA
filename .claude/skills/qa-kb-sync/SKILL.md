@@ -11,7 +11,7 @@ Drive access is through the **Google Drive connector**; everything deterministic
 
 ## Ground rules
 
-1. **Documents never go to git.** This skill runs no git command at all. Documents are git-ignored, refused by `.githooks/pre-commit`, and refused again by the Claude hook. The only git-visible change a sync makes is to `INDEX.md` files, and the **user** reviews and commits those.
+1. **Documents never go to git.** This skill runs no git command at all. Documents are git-ignored (`.gitignore`). The only git-visible change a sync makes is to `INDEX.md` files, and the **user** reviews and commits those.
 2. **Never delete a local file.** A file that disappears from Drive is flagged in the index and the manifest, never deleted. Someone may still be testing against it.
 3. **Only read what changed.** Unchanged files are never downloaded or summarised. That is what keeps a run cheap however large the knowledge base grows.
 4. **Never overwrite a person's index work.** Add rows for new files; touch only the rows of files that changed. Mark every row you write `auto-summary — needs review`, and leave hand-written rows and the "Known gaps" section alone.
@@ -31,19 +31,11 @@ python .claude/skills/qa-kb-sync/scripts/kb_sync.py check
 
 If no folder has a link, stop and ask for them. They go in `knowledge-base/sync-config.json` — one Drive **folder** link per knowledge-base folder. A folder left as `<PASTE…>` is skipped, which is fine.
 
-**2. Confirm the git guard is on.**
+**2. Confirm Google Drive is connected** with a small `search_files` call. If it fails, the user connects Google Drive under **Settings → Connectors**, then retry.
 
-```bash
-git config core.hooksPath
-```
+**3. Run a first sync** (below) so any problem surfaces now rather than silently on a Monday.
 
-It must print `.githooks`. If not, run `git config core.hooksPath .githooks` — that is what keeps documents out of commits made outside Claude.
-
-**3. Confirm Google Drive is connected** with a small `search_files` call. If it fails, the user connects Google Drive under **Settings → Connectors**, then retry.
-
-**4. Run a first sync** (below) so any problem surfaces now rather than silently on a Monday.
-
-**5. Register the schedule** with `create_scheduled_task`:
+**4. Register the schedule** with `create_scheduled_task`:
 
 - `taskId`: `qa-kb-sync`
 - `cronExpression`: `0 9 * * 1` — every Monday 09:00 **local** time

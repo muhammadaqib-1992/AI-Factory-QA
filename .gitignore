@@ -1,16 +1,12 @@
 # ---------------------------------------------------------------------------
-# Local environment file — holds real credentials. NEVER commit this.
+# Local environment file (.env) — holds real credentials. NEVER commit this.
 # Credentials committed to git stay in history even after deletion, so
 # recovering means rotating every password AND rewriting history for everyone.
-# The PreToolUse hook in .claude/hooks/block-secret-commit.sh backs this up.
 # ---------------------------------------------------------------------------
-.claude/qa-test-env.md
-# NOTE: .claude/settings.json IS committed - it is what switches the hooks on,
-# and a clone with it missing has no guards at all. Personal overrides belong
-# in .claude/settings.local.json, which stays ignored below.
+# Personal overrides of .claude/settings.json.
 .claude/settings.local.json
 
-# Other credential shapes
+# Credential files
 .env
 .env.*
 !.env.example
@@ -23,7 +19,6 @@
 # Project documents NEVER go to GitHub. knowledge-base/ commits only its map:
 # READMEs, INDEX.md files and sync-config.json. The documents themselves are
 # downloaded locally from Google Drive by the qa-kb-sync skill.
-# Enforced three times: here, .githooks/pre-commit, and the Claude PreToolUse hook.
 # Sync manifests, listings and SYNC_LOG.md are per-machine state, covered by this too.
 # ---------------------------------------------------------------------------
 knowledge-base/**
@@ -32,6 +27,12 @@ knowledge-base/**
 !knowledge-base/sync-config.json
 !knowledge-base/**/INDEX.md
 !knowledge-base/**/.gitkeep
+
+# Pipeline runtime state — per machine, never committed.
+.auth/
+state/
+logs/
+reports/_attachments/
 
 # Tooling run artefacts — regenerate rather than commit.
 # (test-cases/, reports/ and bug-evidence/ ARE tracked — they are the team's QA record.)

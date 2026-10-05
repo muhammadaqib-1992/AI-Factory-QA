@@ -10,13 +10,12 @@ A QA agent is only as good as the context it can reach and the procedures it fol
 
 - **Knowledge** lives in `knowledge-base/`, indexed so the agent reads a summary before it ever opens a source document.
 - **Procedures** live in `.claude/skills/`, loaded only when the task calls for them.
-- **Guardrails** live in `.claude/hooks/`, enforced by the harness rather than by trust.
 
 The whole design serves one constraint: **the context window is shared between your conversation and everything the agent loads.** Every architectural choice below is ultimately about not wasting it.
 
 ---
 
-## Five primitives, five jobs
+## Four primitives, four jobs
 
 Getting these confused is the most common way to build the wrong thing.
 
@@ -24,7 +23,6 @@ Getting these confused is the most common way to build the wrong thing.
 |---|---|---|
 | **CLAUDE.md** | Every conversation, always | Project-wide standards that always apply |
 | **Skills** | On demand, when the request matches | Task-specific procedures and expertise |
-| **Hooks** | On events (tool calls, session start, stop) | Enforcement and automation you cannot rely on the model to remember |
 | **Subagents** | When you delegate | Isolated execution contexts for parallel or noisy work |
 | **MCP servers** | Always available as tools | Reaching external systems (browser, tracker, database) |
 
@@ -32,11 +30,10 @@ Rules of thumb:
 
 - If it must be true in **every** conversation → `CLAUDE.md`.
 - If it is a **procedure for a kind of task** → a skill.
-- If it must happen **whether or not the model chooses to** → a hook.
 - If it needs **its own context window** → a subagent.
 - If it talks to **something outside this machine** → an MCP server.
 
-Do not force everything into skills. A "never commit secrets" rule in a skill is a suggestion; the same rule in a `PreToolUse` hook is enforcement.
+Do not force everything into skills. Anything deterministic — signing in, building a PDF, recording which tickets were tested — belongs in a script the skill runs, not in instructions the model re-derives.
 
 ---
 
@@ -134,26 +131,6 @@ This one surprises people. A skill loads into **your** conversation. Delegate to
 
 ---
 
-## Hooks — the enforcement layer
-
-Skills are advice; hooks are rules. Configure them in `.claude/settings.json` (see `.claude/settings.json.example`).
-
-| Hook | Fires | Typical QA use |
-|---|---|---|
-| `PreToolUse` | Before a tool call — **can block it** | Refuse a commit containing the credentials file; refuse a push to `main` |
-| `PostToolUse` | After a successful tool call | Auto-format, auto-lint |
-| `Stop` | When the agent wants to end its turn | Refuse to finish while checks are failing |
-| `SubagentStop` | When a subagent finishes | Same, for delegated work |
-| `PreCompact` / `PostCompact` | Around compaction | Housekeeping |
-| `InstructionsLoaded` | When CLAUDE.md or a rule file loads | Audit what actually made it into context |
-| `SessionStart` | Session start (`startup` source for fresh starts only) | Verify MCP connections, remind about the env file |
-
-**The compaction trap:** to re-inject context *after* compaction, do not use `PostCompact` — use `SessionStart` with the `compact` matcher. That is the one whose output actually reaches the conversation.
-
-Two hooks ship here as working examples: `block-secret-commit.sh` (`PreToolUse`) and `session-start-check.sh` (`SessionStart`).
-
----
-
 ## Knowledge base: index first, source second
 
 `knowledge-base/` holds the project's documents. The rule that makes it affordable:
@@ -171,9 +148,8 @@ Each folder carries a `README.md` or `INDEX.md` summarising what is inside. For 
 An agent reporting success is a claim, not evidence. For unattended or long runs:
 
 - Start from the **diff and the actual test output**, not the agent's summary.
-- Use a **`Stop` hook** running your test suite so a turn cannot end on a broken tree.
 - Use **`/goal`** when you can describe "done" better than you can describe the steps — the agent keeps working until a completion condition is confirmed.
-- Permission modes matter: auto-accept modes judge *danger*, not *correctness*. Broken code is not dangerous, so it sails through. Pair permissive modes with a `Stop` hook that runs tests.
+- Permission modes matter: auto-accept modes judge *danger*, not *correctness*. Check the results (record state, the report), not the agent's summary.
 
 ---
 
@@ -182,5 +158,4 @@ An agent reporting success is a claim, not evidence. For unattended or long runs
 1. Put project documents in `knowledge-base/`, and **write the index** — the index is the point.
 2. Fill in the placeholders in `CLAUDE.md`.
 3. Adapt the five skills; keep the naming prefix and the draft-before-write discipline.
-4. Add hooks for anything that must not depend on the model remembering.
-5. Run `python scripts/validate_skills.py` before committing.
+4. Run `python scripts/validate_skills.py` before committing.

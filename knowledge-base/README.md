@@ -42,13 +42,7 @@ Most application behaviour traces back to a decision recorded somewhere else. Be
 
 Only the **map** is committed: this README, each folder's `INDEX.md`, and `sync-config.json`. The documents themselves — solution documents, TDD, BRD, SOW, call recordings, client data — live **only on each person's machine**.
 
-Client documents pushed to GitHub stay in history permanently, even after deletion. So this is enforced three times rather than merely asked for:
-
-| Layer | What it stops |
-|---|---|
-| `.gitignore` | Documents never appear in a normal `git add` |
-| `.githooks/pre-commit` | Any commit containing a document — including after `git add -f`, and commits made in a terminal outside Claude. Switch it on once per clone: `git config core.hooksPath .githooks` |
-| Claude `PreToolUse` hook | Claude staging or committing a document, even on a clone where the git hook was never switched on |
+Client documents pushed to GitHub stay in history permanently, even after deletion. `.gitignore` keeps them out of a normal `git add` — never use `git add -f` on anything in this folder.
 
 Every index row carries its document's Google Drive link, so a teammate who hasn't synced can still open the source.
 

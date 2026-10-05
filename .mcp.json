@@ -1,0 +1,60 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "--no-install",
+        "playwright-mcp",
+        "--headless",
+        "--browser", "chromium",
+        "--isolated",
+        "--storage-state", ".auth/netsuite-state.json",
+        "--output-dir", "logs/playwright",
+        "--viewport-size", "1440x900",
+        "--timeout-action", "15000",
+        "--timeout-navigation", "90000"
+      ]
+    },
+
+    "jira": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "--no-install",
+        "mcp-remote",
+        "https://mcp.atlassian.com/v1/mcp",
+        "${JIRA_MCP_CALLBACK_PORT:-3334}"
+      ]
+    },
+
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+
+    "gdrive": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-gdrive@2025.1.14"],
+      "env": {
+        "GDRIVE_OAUTH_PATH": "${GDRIVE_OAUTH_PATH}",
+        "GDRIVE_CREDENTIALS_PATH": "${GDRIVE_CREDENTIALS_PATH}"
+      }
+    },
+
+    "netsuite": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["--no-install", "netsuite-mcp"],
+      "env": {
+        "NETSUITE_ACCOUNT_ID": "${NETSUITE_ACCOUNT_ID}",
+        "NETSUITE_CLIENT_ID": "${NETSUITE_CLIENT_ID}",
+        "OAUTH_CALLBACK_PORT": "${NETSUITE_OAUTH_CALLBACK_PORT:-8080}"
+      }
+    }
+  }
+}

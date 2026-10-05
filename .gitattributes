@@ -1,11 +1,6 @@
-# Keep shell hooks on LF line endings on every platform.
-#
-# Claude Code runs the hooks in .claude/hooks/ with bash. On Windows, git's
-# default core.autocrlf=true would check them out with CRLF endings, and bash
-# then fails with "$'\r': command not found" - the credentials-commit guard
-# silently stops protecting you. Pinning eol=lf prevents that.
+# Keep shell scripts on LF line endings on every platform; a CRLF script fails on Linux
+# with "$'\r': command not found".
 *.sh text eol=lf
-
-# Same for the git hooks in .githooks/. `pre-commit` has no extension, so the rule
-# above would miss it — and a CRLF pre-commit hook fails the same silent way.
-.githooks/* text eol=lf
+*.mjs text eol=lf
+*.yml text eol=lf
+.env.example text eol=lf

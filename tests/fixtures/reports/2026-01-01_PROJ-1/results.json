@@ -1,0 +1,16 @@
+{
+  "complete": true,
+  "ticket": { "key": "PROJ-1", "summary": "Create a customer", "type": "Bug", "priority": "Medium", "url": "https://example.atlassian.net/browse/PROJ-1", "statusEnteredAt": "2026-01-01T09:00:00.000+0000" },
+  "environment": { "name": "sandbox", "url": "https://example.app.netsuite.com" },
+  "role": "Administrator",
+  "startedAt": "2026-01-01T10:00:00Z",
+  "finishedAt": "2026-01-01T10:20:00Z",
+  "testCasesFile": "tests/fixtures/test-cases/2026-01-01_PROJ-1.md",
+  "summary": "One case passed, one failed; a bug was raised under the ticket.",
+  "testCases": [
+    { "id": "TC_PROJ-1_01", "title": "Customer saves with the given name", "status": "Passed", "actual": "Customer 1234 saved with name shown", "evidence": [] },
+    { "id": "TC_PROJ-1_02", "title": "Duplicate name is rejected", "status": "Failed", "actual": "Second customer saved; no warning", "evidence": ["tests/fixtures/reports/2026-01-01_PROJ-1/screenshots/shot.png"], "bugs": ["PROJ-2"] }
+  ],
+  "bugs": [ { "key": "PROJ-2", "url": "https://example.atlassian.net/browse/PROJ-2", "summary": "Customer — duplicate name accepted", "action": "created", "testCaseIds": ["TC_PROJ-1_02"], "assignee": "Bug assignee" } ],
+  "notes": ["Fixture for the smoke test."]
+}

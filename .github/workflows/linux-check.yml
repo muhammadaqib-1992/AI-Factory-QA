@@ -1,0 +1,63 @@
+name: Linux check
+
+# Proves the workspace runs on Linux: clean install, Chromium with its system libraries,
+# shell scripts, the MCP servers from .mcp.json, headless browsing, and PDF generation.
+# Needs no secrets — nothing here signs in to Jira, NetSuite, GitHub or Google Drive.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Setup script (as a new teammate would run it)
+        run: bash scripts/setup-linux.sh
+
+      - name: Shell scripts — syntax and lint
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          shellcheck -x scripts/*.sh
+
+      - name: Scripts are executable and use LF line endings
+        run: |
+          for f in scripts/*.sh; do
+            test -x "$f" || { echo "$f is not executable"; exit 1; }
+            ! grep -q $'\r' "$f" || { echo "$f has CRLF line endings"; exit 1; }
+          done
+
+      - name: .env loader handles placeholders, quotes and CRLF
+        run: |
+          printf 'GITHUB_PERSONAL_ACCESS_TOKEN=<PASTE_YOUR_PAT>\r\nQUOTED="a b # c"\nPLAIN=v  # comment\nDOLLAR=p@$$w<rd>\n' > .env
+          out="$(scripts/with-env.sh bash -c 'echo "[$GITHUB_PERSONAL_ACCESS_TOKEN][$QUOTED][$PLAIN][$DOLLAR]"')"
+          echo "$out"
+          test "$out" = '[<PASTE_YOUR_PAT>][a b # c][v][p@$$w<rd>]'
+          rm .env
+
+      - name: Setup check
+        run: node scripts/check-setup.mjs --ci
+
+      - name: Tests (MCP servers from .mcp.json, headless Playwright, PDF)
+        run: npm test
+
+      - name: Keep the smoke-test outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.os }}-node${{ matrix.node }}
+          path: logs/
+          if-no-files-found: ignore
