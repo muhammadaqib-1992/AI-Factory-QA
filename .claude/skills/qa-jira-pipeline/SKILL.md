@@ -5,6 +5,18 @@ description: "Unattended QA run for Jira tickets in Ready for QA. First iteratio
 
 # QA Jira pipeline — no human in the loop
 
+**Dashboard step markers.** The run reports to the AI Factory dashboard (stage `testing`:
+`plan → execute → verdict → report`). The runner opens `plan` before you start and closes the
+steps from results.json at the end; you mark the two boundaries in between by running exactly:
+
+| When | Run |
+|---|---|
+| test cases are written (end of step 2 / R2) | `node scripts/factory-step.mjs execute` |
+| all cases have run (end of step 3 / R3) | `node scripts/factory-step.mjs verdict` |
+| you must wait for a person (expired login, missing access) | `node scripts/factory-step.mjs <current step> blocked "<short reason>"` |
+
+No secrets or personal data in the reason; keep it under 200 characters.
+
 Nobody is watching this run. Do not ask questions or wait for approval; when something is
 missing, record it in the results and carry on with what can be done.
 
@@ -63,15 +75,19 @@ One scenario per case; every expected result checkable; cite the source ("Descri
 description is too thin to know what "pass" means, write the narrowest case the text supports,
 note the gap under `## Notes`, and continue.
 
+Then run `node scripts/factory-step.mjs execute`.
+
 ### 3. Execute
 
 Follow `.claude/skills/qa-test-execution/SKILL.md` steps 2–4 for every case (session check →
 driver → steps with a screenshot each → record-state verification), using
 `.claude/skills/qa-test-execution/references/netsuite-ui.md`. Unattended differences:
 
-- Expired NetSuite session: mark every case **Blocked** ("NetSuite session expired — login
+- Expired NetSuite session: run `node scripts/factory-step.mjs execute blocked "NetSuite session expired"`, mark every case **Blocked** ("NetSuite session expired — login
   refresh failed"), write results (step 5) and stop.
 - Record every NetSuite record you create (type, internal id, link) on the case.
+
+Then run `node scripts/factory-step.mjs verdict`.
 
 ### 4. Bugs for failures
 
@@ -120,9 +136,13 @@ For each **Failed** case:
 2. a case for the bug's own reproduction steps, if they differ;
 3. comment-driven cases if the developer described the fix's scope (mark **Inferred**).
 
+Then run `node scripts/factory-step.mjs execute`.
+
 ### R3. Execute
 
 Exactly as step 3 above.
+
+Then run `node scripts/factory-step.mjs verdict`.
 
 ### R4. Close or reopen the bug
 

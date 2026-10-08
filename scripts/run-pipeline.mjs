@@ -20,10 +20,12 @@
 //   node scripts/run-pipeline.mjs --ticket NU-1                first iteration for one ticket now
 //   node scripts/run-pipeline.mjs --retest NU-5 --parent NU-1  retest one bug now
 //   node scripts/run-pipeline.mjs --dry-run                    show what would run, run nothing
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, env, loadEnv } from '../lib/env.mjs';
+import { createStreamParser } from '../lib/claude-stream.mjs';
+import { createReporter, stageTracker } from '../lib/factory-reporter.mjs';
 import { JIRA_SITE, callJira, connectJira, transitionTo } from '../lib/jira-mcp-client.mjs';
 import { buildPdf } from './build-report.mjs';
 import { closeCompleted } from './close-completed.mjs';
@@ -60,7 +62,7 @@ const ALLOWED_TOOLS = [
   'Glob',
   'Grep',
   'Skill',
-  'Bash(node:*)',
+  'Bash(node:*)', // includes scripts/factory-step.mjs, the dashboard step marker
 ];
 
 function takeLock() {
@@ -106,24 +108,99 @@ function ensureNetSuiteSession() {
   return runNode('netsuite-login.mjs', 'NetSuite login') && runNode('check-netsuite-session.mjs', 'NetSuite session');
 }
 
-function runClaude(ticket, execId, logFile) {
-  const claude = env('CLAUDE_BIN', 'claude');
+// Runs Claude headless with streamed JSON output, so token usage and step markers are seen as
+// they happen and fed to the dashboard tracker. Resolves { ok, reason }; never rejects.
+// opts.command / opts.prefixArgs let tests substitute a fake Claude.
+export function runClaude(ticket, execId, logFile, tracker, opts = {}) {
+  const claude = opts.command || env('CLAUDE_BIN', 'claude');
   const timeoutMin = Number(env('QA_TICKET_TIMEOUT_MIN', '45'));
   const prompt = ticket.mode === 'retest' ? `/qa-jira-pipeline retest ${ticket.key} ${execId} ${ticket.parentKey}` : `/qa-jira-pipeline ${ticket.key} ${execId}`;
-  const cliArgs = ['-p', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', ALLOWED_TOOLS.join(','), '--output-format', 'text'];
+  const cliArgs = ['-p', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', ALLOWED_TOOLS.join(','), '--output-format', 'stream-json', '--verbose'];
   if (env('CLAUDE_MODEL', '')) cliArgs.push('--model', env('CLAUDE_MODEL'));
   log(`${execId} ${ticket.key}${ticket.mode === 'retest' ? ` (retest, parent ${ticket.parentKey})` : ''}: running Claude (timeout ${timeoutMin} min) → ${logFile.replace(REPO_ROOT, '.')}`);
-  const r = spawnSync(claude, cliArgs, {
-    cwd: REPO_ROOT,
-    env: process.env,
-    encoding: 'utf8',
-    timeout: timeoutMin * 60000,
-    maxBuffer: 64 * 1024 * 1024,
-    shell: process.platform === 'win32', // resolves claude.cmd on Windows
+
+  return new Promise((resolve) => {
+    const raw = createWriteStream(logFile.replace(/\.log$/, '.jsonl'));
+    const parser = createStreamParser();
+    let resultText = '';
+    let resultError = false;
+    let stderr = '';
+    let buf = '';
+    let timedOut = false;
+    let child;
+    const onLine = (line) => {
+      if (!line.trim()) return;
+      raw.write(`${line}\n`);
+      for (const ev of parser.push(line)) {
+        if (ev.type === 'usage') tracker.addTokens(ev.tokens, ev.model);
+        else if (ev.type === 'step') {
+          if (ev.status === 'blocked') tracker.blocked(ev.message || 'waiting on a person');
+          else if (ev.status === 'failed') tracker.end('failed', ev.message || 'step failed');
+          else tracker.advance(ev.sub, ev.message); // running / succeeded / bare boundary marker
+        } else if (ev.type === 'result') {
+          resultText = ev.text;
+          resultError = ev.isError;
+        }
+      }
+    };
+    try {
+      // A shell is only needed to resolve claude.cmd on Windows; an explicit command runs directly.
+      // Through cmd.exe, arguments with spaces or special characters must be quoted by hand.
+      const useShell = process.platform === 'win32' && !opts.command;
+      const quote = (x) => (/[\s"&|<>^(),]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
+      const args = [...(opts.prefixArgs || []), ...cliArgs];
+      child = spawn(useShell ? quote(claude) : claude, useShell ? args.map(quote) : args, { cwd: REPO_ROOT, env: process.env, shell: useShell });
+    } catch (e) {
+      raw.end();
+      resolve({ ok: false, reason: `could not start Claude: ${e.message}` });
+      return;
+    }
+    const timer = setTimeout(() => {
+      timedOut = true;
+      log(`${execId} ${ticket.key}: timed out after ${timeoutMin} min — stopping Claude`);
+      child.kill('SIGTERM');
+    }, timeoutMin * 60000);
+    child.on('error', (e) => (stderr += `\n${e.message}`));
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) !== -1) {
+        onLine(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+      }
+    });
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (buf) onLine(buf);
+      raw.end();
+      writeFileSync(
+        logFile,
+        `$ ${claude} -p "${prompt}"\n\n${resultText}\n${stderr ? `\n--- stderr ---\n${stderr}` : ''}\nexit: ${code}${signal ? ` (${signal})` : ''}\n(full stream: ${logFile.replace(REPO_ROOT, '.').replace(/\.log$/, '.jsonl')})\n`,
+      );
+      if (code === 0 && !resultError) return resolve({ ok: true });
+      resolve({ ok: false, reason: timedOut ? `timed out after ${timeoutMin} min` : `Claude exited ${code ?? signal}${resultError ? ' with an error result' : ''}` });
+    });
   });
-  writeFileSync(logFile, `$ ${claude} -p "${prompt}"\n\n${r.stdout || ''}\n${r.stderr || ''}\n${r.error ? `ERROR: ${r.error.message}\n` : ''}exit: ${r.status}\n`);
-  if (r.error?.code === 'ENOENT') throw new Error(`"${claude}" not found — install Claude Code: npm install -g @anthropic-ai/claude-code`);
-  return r.status === 0;
+}
+
+// Close the dashboard steps from the run's actual outcome (results.json is the truth).
+export function finishSteps(tracker, results, runFailure) {
+  if (runFailure) return tracker.end('failed', runFailure);
+  const cases = results.testCases || [];
+  if (!results.complete) {
+    const blocked = cases.filter((c) => c.status === 'Blocked');
+    const why = blocked[0]?.actual || (results.notes || [])[0] || 'run incomplete';
+    if (/session|login|expired|2fa/i.test(why)) return tracker.blocked(`waiting for NetSuite login: ${why}`);
+    return tracker.end('failed', `incomplete: ${why}`);
+  }
+  tracker.advance('verdict'); // closes plan/execute if the skill didn't mark them
+  const n = (s) => cases.filter((c) => c.status === s).length;
+  const counts = `${n('Passed')}/${cases.length} passed, ${n('Failed')} failed, ${n('Blocked')} blocked`;
+  const bugs = (results.bugs || []).map((b) => b.key).filter(Boolean);
+  if (n('Failed') || n('Blocked')) return tracker.end('failed', `${counts}${bugs.length ? ` — bugs ${bugs.join(', ')}` : ''}`);
+  return tracker.end('succeeded', counts);
 }
 
 // Ticket (or bug) → "In QA" as its execution starts. Never blocks the run: a missing transition
@@ -232,6 +309,14 @@ async function main() {
 
   if (!ensureNetSuiteSession()) {
     log('NetSuite login failed — no ticket was run. Check .env and logs/netsuite-login-failed_*.png.');
+    for (const t of tickets) {
+      // Tell the dashboard the testing stage is waiting on a person, not failed.
+      const r = createReporter({ taskId: t.key, taskName: t.summary, log: (m) => log(`dashboard: ${m}`) });
+      const tr = stageTracker(r);
+      tr.start('plan', 'picked up');
+      tr.blocked('waiting for NetSuite login (session expired, automatic login failed)');
+      await r.flush(15000);
+    }
     process.exitCode = 1;
     return;
   }
@@ -244,23 +329,33 @@ async function main() {
     const dir = join(REPO_ROOT, 'reports', ticket.parentKey, name);
     mkdirSync(join(REPO_ROOT, 'test-cases', ticket.parentKey), { recursive: true });
     mkdirSync(join(dir, 'screenshots'), { recursive: true });
-    let ok = false;
     let reason = '';
+    // AI Factory dashboard: this agent owns the "testing" stage (plan → execute → verdict → report).
+    const reporter = createReporter({ taskId: ticket.key, taskName: ticket.summary, log: (m) => log(`dashboard: ${m}`) });
+    const tracker = stageTracker(reporter);
+    tracker.start('plan', `${execId}${ticket.mode === 'retest' ? ` retest of ${ticket.key} (parent ${ticket.parentKey})` : ''}`);
     await markInQa(ticket, execId);
     try {
-      ok = runClaude(ticket, execId, join(LOGS, `${name}.log`));
-      if (!ok) reason = `Claude exited with an error — see logs/${name}.log`;
+      const run = await runClaude(ticket, execId, join(LOGS, `${name}.log`), tracker);
+      if (!run.ok) reason = `${run.reason} — see logs/${name}.log`;
     } catch (e) {
       reason = e.message;
-      log(`${execId} ${ticket.key}: ${reason}`);
     }
+    if (reason) log(`${execId} ${ticket.key}: ${reason}`);
+    const hadResults = existsSync(join(dir, 'results.json'));
     const results = ensureResults(dir, ticket, execId, reason || `See logs/${name}.log`);
+    // A crash before any results is a failed step; otherwise the results decide.
+    finishSteps(tracker, results, reason && !hadResults ? reason : '');
     try {
+      if (results.complete) tracker.start('report', `building reports/${rel}/report.pdf`);
       await buildPdf([dir]);
       log(`${execId} ${ticket.key}: report → reports/${rel}/report.pdf`);
+      if (results.complete) tracker.end('succeeded', `reports/${rel}/report.pdf`);
     } catch (e) {
       log(`${execId} ${ticket.key}: PDF failed — ${e.message}`);
+      if (results.complete) tracker.end('failed', `PDF failed: ${e.message}`);
     }
+    await reporter.flush(30000);
 
     // Record the tested cycle. Incomplete runs retry next time, up to QA_MAX_ATTEMPTS.
     const state = readState();
@@ -296,7 +391,9 @@ async function main() {
   await closeCompleted({ log: (m) => log(`close check: ${m}`) });
 }
 
-main().catch((e) => {
-  log(`Pipeline error: ${e.message}`);
-  process.exit(1);
-});
+if (process.argv[1]?.endsWith('run-pipeline.mjs')) {
+  main().catch((e) => {
+    log(`Pipeline error: ${e.message}`);
+    process.exit(1);
+  });
+}

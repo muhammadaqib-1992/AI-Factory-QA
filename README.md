@@ -175,6 +175,18 @@ schtasks /Create /TN "AI-Factory-QA pipeline" /SC MINUTE /MO 15 /TR "cmd /c cd /
 
 Remove it with `schtasks /Delete /TN "AI-Factory-QA pipeline" /F`.
 
+## AI Factory dashboard
+
+The pipeline reports the **testing** stage (`plan → execute → verdict → report`) of every ticket to the AI Factory dashboard — tokens per step, model, and a short message. Set in `.env`:
+
+- `FACTORY_DASHBOARD_URL` — dashboard base URL, e.g. `http://10.164.1.238:3847` (posts go to `/webhooks/stage-status`)
+- `WEBHOOK_SECRET` — sent as the `x-webhook-secret` header; reporting is off while it is empty; never logged
+- `FACTORY_PROJECT_ID` — stable project key (Bitbucket `workspace/repo`), e.g. `folio3/amin-ns-ai-assistant`
+- `FACTORY_PROJECT_NAME` — Jira project display name, e.g. `NS-UnifiedConnector`
+- `FACTORY_TASK_ID` — the Jira key; set per ticket by the runner (only set it yourself when calling `lib/factory-reporter.mjs` directly)
+
+Reporting never blocks or breaks a run: 5 s timeout, retries only network errors / 5xx, logs a 400 (stage order) or 401 (secret) once and carries on. Tokens are sent as increments per step, taken from Claude's own usage stream.
+
 ## Where things are saved
 
 | Path | Holds | In git |
