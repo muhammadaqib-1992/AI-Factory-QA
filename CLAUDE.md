@@ -13,8 +13,8 @@ expected vs. actual, reproduction steps, record ids, what "pass" means per the a
 | User says | Do |
 |---|---|
 | "execute these scripts", "execute", "run these test cases", "execute TC_…", "execute <JIRA-KEY>" | `qa-test-execution` — run every case headless now, screenshots, results.json, PDF |
-| nothing — a ticket reaches **Ready for QA** with label `AI_FActory`, assigned to the QA user | `scripts/run-pipeline.mjs` (scheduled) runs `qa-jira-pipeline`: test cases → execution → bugs → `reports/<KEY>/EXEC-NNNN_<KEY>/report.pdf` |
-| nothing — one of the pipeline's bugs (label `ai-qa-bug`) returns to **Ready for QA** | retest: same process, report under the same ticket, bug **closed** (pass) or **reopened** (fail) |
+| nothing — a ticket reaches **Ready for QA** with label `AI_FActory`, assigned to the QA user | `scripts/run-pipeline.mjs` (scheduled) moves it to **In QA**, then runs `qa-jira-pipeline`: test cases → execution → bugs → `reports/<KEY>/EXEC-NNNN_<KEY>/report.pdf` |
+| nothing — one of the pipeline's bugs (label `ai-qa-bug`) returns to **Ready for QA** | bug → **In QA**, retest: same process, report under the same ticket, bug **closed** (pass) or **reopened** (fail) |
 | nothing — a ticket's cases all passed, or all its pipeline bugs are closed | `scripts/close-completed.mjs` (every run) moves the ticket to **Done / Closed** |
 | "write test cases for …", "create TCs" | `qa-test-writing` — cases as `.md` in `test-cases/` |
 | "log a bug", a failed case from a Jira ticket | `qa-bug-reporting` |

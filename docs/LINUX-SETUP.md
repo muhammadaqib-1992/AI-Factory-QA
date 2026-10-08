@@ -171,7 +171,7 @@ Add this line (replace `<user>`). `bash -lc` loads your profile so cron finds `n
 ✅ **Check:** after 15 minutes `tail logs/pipeline.log` shows a `Pickup:` line.
 
 From now on nothing needs to be typed: put a ticket in **Ready for QA**, assigned to the QA user,
-with the label **`AI_FActory`**, and the next run tests it, files bugs, retests them when they
+with the label **`AI_FActory`**, and the next run moves it to **In QA**, tests it, files bugs, retests them when they
 come back to Ready for QA, and closes the ticket when its QA is complete.
 
 ---

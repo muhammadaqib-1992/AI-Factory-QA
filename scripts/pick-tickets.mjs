@@ -97,8 +97,17 @@ async function collect(client, site, status, jql, mode, state, includeTested) {
   return { found: issues.length, tickets: out };
 }
 
+// Runs that stopped part-way (state cycle "retry:…") — the runner already moved these tickets
+// to the in-QA status, so they no longer match the ready-status queries.
+export function retryJql(state) {
+  const inQa = env('JIRA_IN_QA_STATUS', 'In QA');
+  const keys = Object.entries(state).filter(([, s]) => s && !s.complete && String(s.cycle || '').startsWith('retry:')).map(([k]) => k);
+  if (!keys.length || !inQa) return null;
+  return `key in (${keys.join(', ')}) AND status = "${inQa}"`;
+}
+
 // Tickets to test now: first iterations for new Ready-for-QA tickets, then retests for the
-// pipeline's bugs that developers have moved back to Ready for QA.
+// pipeline's bugs that developers have moved back to Ready for QA, then unfinished runs.
 export async function pickTickets({ includeTested = false } = {}) {
   const site = JIRA_SITE();
   const status = env('JIRA_READY_STATUS', 'Ready for QA');
@@ -109,11 +118,34 @@ export async function pickTickets({ includeTested = false } = {}) {
   try {
     const first = await collect(client, site, status, jql, 'test', state, includeTested);
     const retest = bugJql ? await collect(client, site, status, bugJql, 'retest', state, includeTested) : { found: 0, tickets: [] };
-    const firstKeys = new Set(first.tickets.map((t) => t.key));
-    const tickets = [...first.tickets, ...retest.tickets.filter((t) => !firstKeys.has(t.key))];
+    const rJql = retryJql(state);
+    const retries = [];
+    if (rJql) {
+      const found = await callJira(client, 'searchJiraIssuesUsingJql', { cloudId: site, jql: rJql, maxResults: 50, fields: ['summary', 'issuetype', 'priority', 'labels', 'parent'] });
+      for (const i of found?.issues || []) {
+        const prior = state[i.key];
+        retries.push({
+          mode: prior.mode === 'retest' ? 'retest' : 'test',
+          key: i.key,
+          parentKey: prior.parentKey || i.key,
+          url: `https://${site}/browse/${i.key}`,
+          summary: i.fields?.summary,
+          type: i.fields?.issuetype?.name,
+          priority: i.fields?.priority?.name,
+          labels: i.fields?.labels,
+          cycle: String(prior.cycle).replace(/^retry:/, ''),
+          alreadyTested: false,
+          retry: true,
+          lastRun: prior,
+        });
+      }
+    }
+    const seen = new Set();
+    const tickets = [...first.tickets, ...retest.tickets, ...retries].filter((t) => !seen.has(t.key) && seen.add(t.key));
     return {
       jql,
       bugJql,
+      retryJql: rJql,
       found: first.found,
       bugsFound: retest.found,
       toTest: tickets.filter((t) => !t.alreadyTested).length,

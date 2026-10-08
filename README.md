@@ -72,6 +72,9 @@ scripts/run-pipeline.mjs
 - **One run at a time** (lock file), **at most 5 tickets per run**, **45 min per ticket**. A run
   that does not finish is retried once, then left until the ticket's next QA cycle.
 - Status changes the pipeline makes:
+  - **as a run starts**: the ticket — or the bug being retested — → `JIRA_IN_QA_STATUS`
+    (*In QA*), with a "QA started — execution EXEC-NNNN" comment. A run that stops part-way is
+    retried from *In QA* on the next pass;
   - **its own bugs** after a retest: all passed → `JIRA_CLOSE_STATUS` (*Done / Closed*), any
     failed → `JIRA_REOPEN_STATUS` (*Reopen*);
   - **the ticket** → *Done / Closed* when QA is complete: the first run's cases are all Passed,
@@ -211,6 +214,7 @@ Copy `.env.example` to `.env`. Never commit `.env`.
 | `JIRA_QA_ASSIGNEE` | Assignee picked up | `currentUser()` (the signed-in Jira account) |
 | `JIRA_PICKUP_LABEL` | Label required | `AI_FActory` |
 | `JIRA_PICKUP_JQL` | Replaces all four pickup settings above | — |
+| `JIRA_IN_QA_STATUS` | Status set when a ticket's / bug's execution starts (empty = don't change it) | `In QA` |
 | `JIRA_BUG_ISSUE_TYPE` | Type of the bug filed under the ticket | `Sub-task` |
 | `JIRA_BUG_ASSIGNEE_ACCOUNT_ID` | Who bugs are assigned to | — |
 | `JIRA_BUG_LABEL` | Label on every bug the pipeline files (how it finds them for retest) | `ai-qa-bug` |

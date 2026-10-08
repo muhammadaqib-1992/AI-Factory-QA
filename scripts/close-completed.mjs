@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { REPO_ROOT, env, envBool, loadEnv } from '../lib/env.mjs';
-import { JIRA_SITE, callJira, connectJira } from '../lib/jira-mcp-client.mjs';
+import { JIRA_SITE, callJira, connectJira, transitionTo } from '../lib/jira-mcp-client.mjs';
 import { STATE_FILE, readState } from './pick-tickets.mjs';
 
 loadEnv();
@@ -37,19 +37,6 @@ export function decideClosure(firstResults, bugStatuses, closeStatus, extraBugs 
 function firstResultsFor(entry) {
   const file = entry?.firstReport ? join(REPO_ROOT, dirname(entry.firstReport), 'results.json') : null;
   return file && existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
-}
-
-async function transitionTo(client, site, key, statusName) {
-  const t = await callJira(client, 'getTransitionsForJiraIssue', { cloudId: site, issueIdOrKey: key });
-  const match = (t.transitions || []).find((x) => norm(x.to?.name) === norm(statusName) || norm(x.name) === norm(statusName));
-  if (!match) throw new Error(`no transition to "${statusName}" available from its current status`);
-  try {
-    await callJira(client, 'transitionJiraIssue', { cloudId: site, issueIdOrKey: key, transition: { id: match.id } });
-  } catch (e) {
-    if (!/resolution/i.test(e.message)) throw e;
-    await callJira(client, 'transitionJiraIssue', { cloudId: site, issueIdOrKey: key, transition: { id: match.id }, fields: { resolution: { name: 'Done' } } });
-  }
-  return match.to?.name || statusName;
 }
 
 export async function closeCompleted({ keys, dryRun = false, log = console.log } = {}) {

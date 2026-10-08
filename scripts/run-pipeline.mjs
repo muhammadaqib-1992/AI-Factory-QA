@@ -5,7 +5,8 @@
 //   1. picks the Jira tickets that are Ready for QA, assigned to the QA user and labelled
 //      (scripts/pick-tickets.mjs), skipping QA cycles already tested
 //   2. makes sure the NetSuite session is valid (refreshes the headless login from .env if not)
-//   3. gives each ticket the next execution number (EXEC-0001, EXEC-0002, …)
+//   3. gives each ticket the next execution number (EXEC-0001, EXEC-0002, …) and moves it to
+//      JIRA_IN_QA_STATUS ("In QA") with a "QA started" comment
 //   4. runs Claude headless with the qa-jira-pipeline skill: ticket → test cases → execution →
 //      bugs → results.json
 //   5. builds reports/<TICKET>/<EXEC>_<KEY>/report.pdf and records the tested cycle
@@ -23,7 +24,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, env, loadEnv } from '../lib/env.mjs';
-import { JIRA_SITE } from '../lib/jira-mcp-client.mjs';
+import { JIRA_SITE, callJira, connectJira, transitionTo } from '../lib/jira-mcp-client.mjs';
 import { buildPdf } from './build-report.mjs';
 import { closeCompleted } from './close-completed.mjs';
 import { STATE_FILE, pickTickets, readState } from './pick-tickets.mjs';
@@ -125,6 +126,34 @@ function runClaude(ticket, execId, logFile) {
   return r.status === 0;
 }
 
+// Ticket (or bug) → "In QA" as its execution starts. Never blocks the run: a missing transition
+// or a Jira hiccup is logged and testing goes ahead.
+async function markInQa(ticket, execId) {
+  const inQa = env('JIRA_IN_QA_STATUS', 'In QA');
+  if (!inQa) return;
+  const site = JIRA_SITE();
+  let client;
+  try {
+    client = await connectJira({ quietAuth: true, connectTimeoutMs: Number(env('JIRA_CONNECT_TIMEOUT_SEC', '90')) * 1000 });
+    const issue = await callJira(client, 'getJiraIssue', { cloudId: site, issueIdOrKey: ticket.key, fields: ['status'] });
+    const current = (issue?.issues?.nodes?.[0] || issue)?.fields?.status?.name || '';
+    if (current.trim().toLowerCase() !== inQa.trim().toLowerCase()) {
+      const to = await transitionTo(client, site, ticket.key, inQa);
+      log(`${execId} ${ticket.key}: status ${current || '?'} → ${to}`);
+    }
+    const what = ticket.mode === 'retest' ? `Retest of this bug (parent ${ticket.parentKey})` : 'QA execution';
+    await callJira(client, 'addCommentToJiraIssue', {
+      cloudId: site,
+      issueIdOrKey: ticket.key,
+      commentBody: `QA started — ${what}, execution ${execId}${ticket.retry ? ' (retry of an unfinished run)' : ''}. Results will follow in a comment when it finishes.`,
+    });
+  } catch (e) {
+    log(`${execId} ${ticket.key}: could not move to "${inQa}" — ${e.message} (testing continues)`);
+  } finally {
+    await client?.close().catch(() => {});
+  }
+}
+
 function ensureResults(dir, ticket, execId, reason) {
   const file = join(dir, 'results.json');
   if (existsSync(file)) {
@@ -189,6 +218,7 @@ async function main() {
     log(`Pickup: ${picked.found} ticket(s) and ${picked.bugsFound} bug(s) Ready for QA; ${picked.toTest} to run now.`);
     log(`  tickets JQL: ${picked.jql}`);
     if (picked.bugJql) log(`  bugs JQL:    ${picked.bugJql}`);
+    if (picked.retryJql) log(`  retries JQL: ${picked.retryJql}`);
     tickets = picked.tickets;
   }
   const max = Number(env('QA_MAX_TICKETS_PER_RUN', '5'));
@@ -216,6 +246,7 @@ async function main() {
     mkdirSync(join(dir, 'screenshots'), { recursive: true });
     let ok = false;
     let reason = '';
+    await markInQa(ticket, execId);
     try {
       ok = runClaude(ticket, execId, join(LOGS, `${name}.log`));
       if (!ok) reason = `Claude exited with an error — see logs/${name}.log`;
